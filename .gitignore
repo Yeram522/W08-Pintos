@@ -1,4 +1,1 @@
-# 전체 파일 무시
-*
-
-!threads/thread.c
+build/
