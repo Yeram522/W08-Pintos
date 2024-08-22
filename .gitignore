@@ -1,0 +1,4 @@
+# 전체 파일 무시
+/
+!.gitignore
+!threads/thread.c
