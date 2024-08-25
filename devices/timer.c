@@ -24,6 +24,9 @@ static int64_t ticks;
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
 
+/* List of checking sleeping thread */
+static struct list sleep_list;
+
 static intr_handler_func timer_interrupt;
 static bool too_many_loops(unsigned loops);
 static void busy_wait(int64_t loops);
@@ -41,6 +44,8 @@ void timer_init(void)
 	outb(0x43, 0x34); /* CW: counter 0, LSB then MSB, mode 2, binary. */
 	outb(0x40, count & 0xff);
 	outb(0x40, count >> 8);
+
+	list_init(&sleep_list);
 
 	intr_register_ext(0x20, timer_interrupt, "8254 Timer");
 }
@@ -90,21 +95,55 @@ timer_elapsed(int64_t then)
 	return timer_ticks() - then;
 }
 
+/* Converts pointer to list element LIST_ELEM into a pointer to
+   the structure that LIST_ELEM is embedded inside.  Supply the
+   name of the outer structure STRUCT and the member name MEMBER
+   of the list element.  See the big comment at the top of the
+   file for an example. */
+#define list_entry(LIST_ELEM, STRUCT, MEMBER)           \
+	((STRUCT *) ((uint8_t *) &(LIST_ELEM)->next     \
+		- offsetof (STRUCT, MEMBER.next)))
+
+static bool
+wake_up_ticks_less (const struct list_elem *a_, const struct list_elem *b_,
+            void *aux UNUSED) 
+{
+  const struct thread *a = list_entry (a_, struct thread, elem);
+  const struct thread *b = list_entry (b_, struct thread, elem);
+  
+  return a->wake_up_ticks < b->wake_up_ticks;
+}
+
 /* Suspends execution for approximately TICKS timer ticks. */
 void timer_sleep(int64_t ticks)
 {
 	int64_t start = timer_ticks();
-
 	ASSERT(intr_get_level() == INTR_ON);
+
+	if (ticks <= 0) {
+		return;
+	}
+
+	struct thread *current_thread = thread_current();
+	enum intr_level old_level = intr_disable();
 	// while 문 delete 예정
 	/* while (timer_elapsed (start) < ticks)
 		thread_yield ();*/
 
 	// 1. 스레드를 제어하는 세마포어 sleep_control_sem 선언, sema_init() 함수를 호출하여 0으로 초기화
-	// 2. list_insert_ordered()함수로 sleep list에 thread 추가-> void *aux에 wake_up_ticks를 넣음
-	// 3. thread 구조체 멤버변수 list_elem 에 sleep_list 추가
+	//sema_init (&current_thread->sleep_control_sem, 0);
 	// 4. thread 구조체 멤버변수 wake_up_ticks = timer_ticks() + ticks
+	current_thread->wake_up_ticks = start + ticks;
+
+	// 2. list_insert_ordered()함수로 sleep list에 thread 추가-> void *aux에 wake_up_ticks를 넣음
+	list_insert_ordered(&sleep_list, &current_thread->elem, wake_up_ticks_less, NULL);
+
+	// 3. thread 구조체 멤버변수 list_elem 에 sleep_list 추가 <- 필요없음
+
 	// 5. sema_down() -> 세마포어 같은 동기화 매커니즘을 써야함
+	thread_block();
+	//sema_down (&current_thread->sleep_control_sem);
+	intr_set_level(old_level);
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -135,13 +174,28 @@ void timer_print_stats(void)
 static void
 timer_interrupt(struct intr_frame *args UNUSED)
 {
+	ticks++;
+
+	enum intr_level old_level = intr_disable();
 	// 1. sleep list 순회해서 타임이 다 된 스레드를 깨운다
 	/* 2. if(timer_ticks() >=  thread->wake_up_ticks ){
 	2-1.다 된 스레드를 sema_up() 해준다
 	2-2. list_elem 을 업데이트 해준다
 	2-3. sleep_list 에서 스레드를 제거해준다} */
+	if (!list_empty(&sleep_list)) {
+		struct thread *head_sleep_thread;
+		while(!list_empty(&sleep_list)) {
+			head_sleep_thread = list_entry(list_front(&sleep_list), struct thread, elem);
+			if (ticks < head_sleep_thread->wake_up_ticks) {
+				break;
+			}
+			list_pop_front(&sleep_list);
+			thread_unblock(head_sleep_thread);
+			//sema_up(&head_sleep_thread->sleep_control_sem);
+		}
+	}
+	intr_set_level(old_level);
 
-	ticks++;
 	thread_tick();
 }
 
