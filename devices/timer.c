@@ -7,6 +7,7 @@
 #include "threads/io.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
+#include "lib/kernel/list.h"
 
 /* See [8254] for hardware details of the 8254 timer chip. */
 
@@ -17,6 +18,11 @@
 #error TIMER_FREQ <= 1000 recommended
 #endif
 
+/*Get list entry*/
+#define list_entry(LIST_ELEM, STRUCT, MEMBER)           \
+	((STRUCT *) ((uint8_t *) &(LIST_ELEM)->next     \
+		- offsetof (STRUCT, MEMBER.next)))
+
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
 
@@ -24,10 +30,15 @@ static int64_t ticks;
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
 
+/* List of checking sleeping thread */
+static struct list sleep_list;
+
 static intr_handler_func timer_interrupt;
 static bool too_many_loops(unsigned loops);
 static void busy_wait(int64_t loops);
 static void real_time_sleep(int64_t num, int32_t denom);
+static bool tick_less (const struct list_elem *, const struct list_elem *,
+                        void *); //wake_up_time? 기준으로 정렬하는 함수
 
 /* Sets up the 8254 Programmable Interval Timer (PIT) to
    interrupt PIT_FREQ times per second, and registers the
@@ -41,6 +52,8 @@ void timer_init(void)
 	outb(0x43, 0x34); /* CW: counter 0, LSB then MSB, mode 2, binary. */
 	outb(0x40, count & 0xff);
 	outb(0x40, count >> 8);
+
+	list_init(&sleep_list);
 
 	intr_register_ext(0x20, timer_interrupt, "8254 Timer");
 }
@@ -96,15 +109,22 @@ void timer_sleep(int64_t ticks)
 	int64_t start = timer_ticks();
 
 	ASSERT(intr_get_level() == INTR_ON);
-	// while 문 delete 예정
-	/* while (timer_elapsed (start) < ticks)
-		thread_yield ();*/
+	
+	struct thread *curr = thread_current();
+	enum intr_level old_level;
 
+	// 4. sema_down() -> 세마포어 같은 동기화 매커니즘을 써야함
+	old_level = intr_disable();  // 인터럽트 비활성화
+	//sema_down(&curr->sleep_control_sem);
 	// 1. 스레드를 제어하는 세마포어 sleep_control_sem 선언, sema_init() 함수를 호출하여 0으로 초기화
-	// 2. list_insert_ordered()함수로 sleep list에 thread 추가-> void *aux에 wake_up_ticks를 넣음
-	// 3. thread 구조체 멤버변수 list_elem 에 sleep_list 추가
-	// 4. thread 구조체 멤버변수 wake_up_ticks = timer_ticks() + ticks
-	// 5. sema_down() -> 세마포어 같은 동기화 매커니즘을 써야함
+	// 2. thread 구조체 멤버변수 wake_up_ticks = timer_ticks() + ticks
+	curr->wake_up_ticks = start + ticks;
+	// 3. list_insert_ordered()함수로 sleep list에 thread 추가-> void *aux에 wake_up_ticks를 넣음
+	list_insert_ordered(&sleep_list, &curr->elem, tick_less, NULL);	
+
+	thread_block();
+
+	intr_set_level(old_level);
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -136,11 +156,22 @@ static void
 timer_interrupt(struct intr_frame *args UNUSED)
 {
 	// 1. sleep list 순회해서 타임이 다 된 스레드를 깨운다
-	/* 2. if(timer_ticks() >=  thread->wake_up_ticks ){
-	2-1.다 된 스레드를 sema_up() 해준다
-	2-2. list_elem 을 업데이트 해준다
-	2-3. sleep_list 에서 스레드를 제거해준다} */
+	struct list_elem *e = list_begin(&sleep_list);
+    while (e != list_end(&sleep_list))
+    {
+		/* 2. if(timer_ticks() >=  thread->wake_up_ticks )*/
+        struct thread *t = list_entry(e, struct thread, elem);
+        if (timer_ticks() < t->wake_up_ticks)
+            break;  // 리스트가 정렬되어 있다고 가정
 
+		//2-1.다 된 스레드를 sema_up() 해준다
+		//2-2. list_elem 을 업데이트 해준다
+		//2-3. sleep_list 에서 스레드를 제거해준다.
+        e = list_remove(e);  // 현재 요소 제거 및 다음 요소로 이동
+		//sema_up(&thread->sleep_control_sem);
+        thread_unblock(t);
+    }
+	
 	ticks++;
 	thread_tick();
 }
@@ -206,4 +237,16 @@ real_time_sleep(int64_t num, int32_t denom)
 		ASSERT(denom % 1000 == 0);
 		busy_wait(loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000));
 	}
+}
+
+/* Returns true if value A is less than value B, false
+   otherwise. */
+static bool
+tick_less (const struct list_elem *a_, const struct list_elem *b_,
+            void *aux UNUSED) 
+{
+  const struct thread *a = list_entry (a_, struct thread, elem);
+  const struct thread *b = list_entry (b_, struct thread, elem);
+  
+  return a->wake_up_ticks < b->wake_up_ticks;
 }
