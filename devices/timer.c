@@ -105,11 +105,15 @@ void timer_sleep(int64_t ticks)
 	ASSERT(intr_get_level() == INTR_ON);
 
 	struct thread *current_thread = thread_current();
-	current_thread->wake_up_ticks = timer_ticks() + ticks;
+	enum intr_level old_level = intr_disable(); // 현재 인터럽트 레벨 저장하고 비활성화
+
+	current_thread->wake_up_ticks = start + ticks;
 
 	list_insert_ordered(&sleep_list, &current_thread->elem, tick_less, NULL);
 
 	thread_block();
+
+	intr_set_level(old_level); // 인터럽트 레벨 복구
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -140,30 +144,24 @@ void timer_print_stats(void)
 static void
 timer_interrupt(struct intr_frame *args UNUSED)
 {
-	// 1. sleep list 순회해서 타임이 다 된 스레드를 깨운다
+	ticks++;
+	// sleep_list의 처음 포인터 반환
 	struct list_elem *e = list_begin(&sleep_list);
+
+	// sleep_list의 끝까지 순회
 	while (e != list_end(&sleep_list))
 	{
-		/* 2. if(timer_ticks() >=  thread->wake_up_ticks ){
-		2-1.다 된 스레드를 sema_up() 해준다
-		2-2. list_elem 을 업데이트 해준다
-		2-3. sleep_list 에서 스레드를 제거해준다} */
-
 		struct thread *t = list_entry(e, struct thread, elem);
-
-		if (timer_ticks() >= t->wake_up_ticks)
+		if (ticks >= t->wake_up_ticks)
 		{
 			e = list_remove(e);
 			thread_unblock(t);
 		}
 		else
 		{
-			e = list_next(e);
+			break;
 		}
 	}
-
-	ticks++;
-
 	thread_tick();
 }
 
