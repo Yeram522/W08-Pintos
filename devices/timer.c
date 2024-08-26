@@ -103,22 +103,13 @@ void timer_sleep(int64_t ticks)
 	int64_t start = timer_ticks();
 
 	ASSERT(intr_get_level() == INTR_ON);
-	// while 문 delete 예정
-	/* while (timer_elapsed (start) < ticks)
-		thread_yield ();*/
 
-	struct thread *current_thread;
-	// 1. 스레드를 제어하는 세마포어 sleep_control_sem 선언, sema_init() 함수를 호출하여 0으로 초기화
-	struct semaphore *sleep_control_sem;
-	sema_init(&sleep_control_sem, 0);
-	// 2. list_insert_ordered()함수로 sleep list에 thread 추가-> void *aux에 wake_up_ticks를 넣음
-	list_insert_ordered(&sleep_list, &current_thread->elem, tick_less, NULL);
-	// 3. thread 구조체 멤버변수 list_elem 에 sleep_list 추가
-	struct list_elem *sleep_list_elem(struct list sleep_list);
-	// 4. thread 구조체 멤버변수 wake_up_ticks = timer_ticks() + ticks
+	struct thread *current_thread = thread_current();
 	current_thread->wake_up_ticks = timer_ticks() + ticks;
-	// 5. sema_down() -> 세마포어 같은 동기화 매커니즘을 써야함
-	sema_down(&sleep_control_sem);
+
+	list_insert_ordered(&sleep_list, &current_thread->elem, tick_less, NULL);
+
+	thread_block();
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -162,7 +153,6 @@ timer_interrupt(struct intr_frame *args UNUSED)
 
 		if (timer_ticks() >= t->wake_up_ticks)
 		{
-			sema_up(&t->sleep_control_sem);
 			e = list_remove(e);
 			thread_unblock(t);
 		}
