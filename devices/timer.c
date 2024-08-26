@@ -110,21 +110,19 @@ void timer_sleep(int64_t ticks)
 
 	ASSERT(intr_get_level() == INTR_ON);
 	
-	struct thread *curr = thread_current();
+	struct thread *t = thread_current();
 	enum intr_level old_level;
+	old_level = intr_disable();  // disable interrupt and return prev intrrupt status
 
-	// 4. sema_down() -> 세마포어 같은 동기화 매커니즘을 써야함
-	old_level = intr_disable();  // 인터럽트 비활성화
-	//sema_down(&curr->sleep_control_sem);
-	// 1. 스레드를 제어하는 세마포어 sleep_control_sem 선언, sema_init() 함수를 호출하여 0으로 초기화
-	// 2. thread 구조체 멤버변수 wake_up_ticks = timer_ticks() + ticks
-	curr->wake_up_ticks = start + ticks;
-	// 3. list_insert_ordered()함수로 sleep list에 thread 추가-> void *aux에 wake_up_ticks를 넣음
-	list_insert_ordered(&sleep_list, &curr->elem, tick_less, NULL);	
+	// current thread의 wake_up_ticks를 초기화.
+	t->wake_up_ticks = start + ticks;
 
-	thread_block();
+	// sleep list에 thread 추가-> void *aux에 wake_up_ticks를 넣음
+	list_insert_ordered(&sleep_list, &t->elem, tick_less, NULL);	
 
-	intr_set_level(old_level);
+	thread_block(); // thread_block은 interrupt가 OFF된 상태일 때 가능하다.
+
+	intr_set_level(old_level); // interrupt status 복원
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -155,21 +153,20 @@ void timer_print_stats(void)
 static void
 timer_interrupt(struct intr_frame *args UNUSED)
 {
-	// 1. sleep list 순회해서 타임이 다 된 스레드를 깨운다
+	// Search target of wake_up_thread from sleep list 
 	struct list_elem *e = list_begin(&sleep_list);
     while (e != list_end(&sleep_list))
     {
-		/* 2. if(timer_ticks() >=  thread->wake_up_ticks )*/
-        struct thread *t = list_entry(e, struct thread, elem);
+		//Get start adderess of thread t from element addr
+        struct thread *t = list_entry(e, struct thread, elem); 
+		
         if (timer_ticks() < t->wake_up_ticks)
-            break;  // 리스트가 정렬되어 있다고 가정
+            break;  // Assume sorting list
 
-		//2-1.다 된 스레드를 sema_up() 해준다
-		//2-2. list_elem 을 업데이트 해준다
-		//2-3. sleep_list 에서 스레드를 제거해준다.
-        e = list_remove(e);  // 현재 요소 제거 및 다음 요소로 이동
-		//sema_up(&thread->sleep_control_sem);
-        thread_unblock(t);
+		/* Makes thread unblocock if timer_ticks() >=  thread->wake_up_ticks*/
+        e = list_remove(e);  // remove current elem and move next elem
+
+        thread_unblock(t); // use unblock func
     }
 	
 	ticks++;
