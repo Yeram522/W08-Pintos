@@ -24,10 +24,15 @@ static int64_t ticks;
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
 
+/* List of checking sleeping thread */
+static struct list sleep_list;
+
 static intr_handler_func timer_interrupt;
 static bool too_many_loops(unsigned loops);
 static void busy_wait(int64_t loops);
 static void real_time_sleep(int64_t num, int32_t denom);
+static bool tick_less(const struct list_elem *a_, const struct list_elem *b_,
+					  void *aux UNUSED);
 
 /* Sets up the 8254 Programmable Interval Timer (PIT) to
    interrupt PIT_FREQ times per second, and registers the
@@ -41,6 +46,8 @@ void timer_init(void)
 	outb(0x43, 0x34); /* CW: counter 0, LSB then MSB, mode 2, binary. */
 	outb(0x40, count & 0xff);
 	outb(0x40, count >> 8);
+
+	list_init(&sleep_list);
 
 	intr_register_ext(0x20, timer_interrupt, "8254 Timer");
 }
@@ -100,11 +107,18 @@ void timer_sleep(int64_t ticks)
 	/* while (timer_elapsed (start) < ticks)
 		thread_yield ();*/
 
+	struct thread *current_thread;
 	// 1. 스레드를 제어하는 세마포어 sleep_control_sem 선언, sema_init() 함수를 호출하여 0으로 초기화
+	struct semaphore *sleep_control_sem;
+	sema_init(&sleep_control_sem, 0);
 	// 2. list_insert_ordered()함수로 sleep list에 thread 추가-> void *aux에 wake_up_ticks를 넣음
+	list_insert_ordered(&sleep_list, &current_thread->elem, tick_less, NULL);
 	// 3. thread 구조체 멤버변수 list_elem 에 sleep_list 추가
+	struct list_elem *sleep_list_elem(struct list sleep_list);
 	// 4. thread 구조체 멤버변수 wake_up_ticks = timer_ticks() + ticks
+	current_thread->wake_up_ticks = timer_ticks() + ticks;
 	// 5. sema_down() -> 세마포어 같은 동기화 매커니즘을 써야함
+	sema_down(&sleep_control_sem);
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -136,12 +150,30 @@ static void
 timer_interrupt(struct intr_frame *args UNUSED)
 {
 	// 1. sleep list 순회해서 타임이 다 된 스레드를 깨운다
-	/* 2. if(timer_ticks() >=  thread->wake_up_ticks ){
-	2-1.다 된 스레드를 sema_up() 해준다
-	2-2. list_elem 을 업데이트 해준다
-	2-3. sleep_list 에서 스레드를 제거해준다} */
+	struct list_elem *e = list_begin(&sleep_list);
+	while (e != list_end(&sleep_list))
+	{
+		/* 2. if(timer_ticks() >=  thread->wake_up_ticks ){
+		2-1.다 된 스레드를 sema_up() 해준다
+		2-2. list_elem 을 업데이트 해준다
+		2-3. sleep_list 에서 스레드를 제거해준다} */
+
+		struct thread *t = list_entry(e, struct thread, elem);
+
+		if (timer_ticks() >= t->wake_up_ticks)
+		{
+			sema_up(&t->sleep_control_sem);
+			e = list_remove(e);
+			thread_unblock(t);
+		}
+		else
+		{
+			e = list_next(e);
+		}
+	}
 
 	ticks++;
+
 	thread_tick();
 }
 
@@ -206,4 +238,19 @@ real_time_sleep(int64_t num, int32_t denom)
 		ASSERT(denom % 1000 == 0);
 		busy_wait(loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000));
 	}
+}
+
+#define list_entry(LIST_ELEM, STRUCT, MEMBER) \
+	((STRUCT *)((uint8_t *)&(LIST_ELEM)->next - offsetof(STRUCT, MEMBER.next)))
+
+/* Returns true if value A is less than value B, false
+   otherwise. */
+static bool
+tick_less(const struct list_elem *a_, const struct list_elem *b_,
+		  void *aux UNUSED)
+{
+	const struct thread *a = list_entry(a_, struct thread, elem);
+	const struct thread *b = list_entry(b_, struct thread, elem);
+
+	return a->wake_up_ticks < b->wake_up_ticks;
 }
