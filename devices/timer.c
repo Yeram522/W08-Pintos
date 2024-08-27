@@ -7,6 +7,7 @@
 #include "threads/io.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
+#include "lib/kernel/list.h"
 
 /* See [8254] for hardware details of the 8254 timer chip. */
 
@@ -16,6 +17,11 @@
 #if TIMER_FREQ > 1000
 #error TIMER_FREQ <= 1000 recommended
 #endif
+
+/*Get list entry*/
+#define list_entry(LIST_ELEM, STRUCT, MEMBER)           \
+	((STRUCT *) ((uint8_t *) &(LIST_ELEM)->next     \
+		- offsetof (STRUCT, MEMBER.next)))
 
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
@@ -31,8 +37,8 @@ static intr_handler_func timer_interrupt;
 static bool too_many_loops(unsigned loops);
 static void busy_wait(int64_t loops);
 static void real_time_sleep(int64_t num, int32_t denom);
-static bool tick_less(const struct list_elem *a_, const struct list_elem *b_,
-					  void *aux UNUSED);
+static bool wake_up_ticks_less (const struct list_elem *a_, const struct list_elem *b_,void *aux UNUSED) ;
+
 
 /* Sets up the 8254 Programmable Interval Timer (PIT) to
    interrupt PIT_FREQ times per second, and registers the
@@ -97,21 +103,35 @@ timer_elapsed(int64_t then)
 	return timer_ticks() - then;
 }
 
+static bool
+wake_up_ticks_less (const struct list_elem *a_, const struct list_elem *b_,
+            void *aux UNUSED) 
+{
+  const struct thread *a = list_entry (a_, struct thread, elem);
+  const struct thread *b = list_entry (b_, struct thread, elem);
+  
+  return a->wake_up_ticks < b->wake_up_ticks;
+}
+
 /* Suspends execution for approximately TICKS timer ticks. */
 void timer_sleep(int64_t ticks)
 {
 	int64_t start = timer_ticks();
-
 	ASSERT(intr_get_level() == INTR_ON);
+	
+	// 예외 처리
+	if (ticks <= 0) {
+		return;
+	}
 
 	struct thread *current_thread = thread_current();
-	enum intr_level old_level = intr_disable(); // 현재 인터럽트 레벨 저장하고 비활성화
+	enum intr_level old_level = intr_disable(); // 현재 인터럽트 레벨 저장하고 비활성화 
 
-	current_thread->wake_up_ticks = start + ticks;
+	current_thread->wake_up_ticks = start + ticks; // 스레드를 unblock시켜야 하는 ticks를 계산해 스레드의 멤버 변수 wake_up_ticks에 저장
 
-	list_insert_ordered(&sleep_list, &current_thread->elem, tick_less, NULL);
+	list_insert_ordered(&sleep_list, &current_thread->elem, wake_up_ticks_less, NULL); // wake_up_ticks를 기준으로 오름차순 정렬하여 sleep_list에 스레드 삽입
 
-	thread_block();
+	thread_block(); // 스레드를 sleep 상태로 전환
 
 	intr_set_level(old_level); // 인터럽트 레벨 복구
 }
@@ -145,23 +165,24 @@ static void
 timer_interrupt(struct intr_frame *args UNUSED)
 {
 	ticks++;
-	// sleep_list의 처음 포인터 반환
-	struct list_elem *e = list_begin(&sleep_list);
 
-	// sleep_list의 끝까지 순회
-	while (e != list_end(&sleep_list))
-	{
-		struct thread *t = list_entry(e, struct thread, elem);
-		if (ticks >= t->wake_up_ticks)
-		{
-			e = list_remove(e);
-			thread_unblock(t);
-		}
-		else
-		{
-			break;
-		}
-	}
+	// Search target of wake_up_thread from sleep list 
+	struct list_elem *e = list_begin(&sleep_list);
+    while (e != list_end(&sleep_list))
+    {
+		//Get start adderess of thread t from element addr
+        struct thread *t = list_entry(e, struct thread, elem); 
+		
+        if (ticks < t->wake_up_ticks)
+            break;  // Assume sorting list
+
+		/* Makes thread unblocock if timer_ticks() >=  thread->wake_up_ticks*/
+        e = list_remove(e);  // remove current elem and move next elem
+
+        thread_unblock(t); // use unblock func
+    }
+	
+
 	thread_tick();
 }
 
@@ -228,17 +249,3 @@ real_time_sleep(int64_t num, int32_t denom)
 	}
 }
 
-#define list_entry(LIST_ELEM, STRUCT, MEMBER) \
-	((STRUCT *)((uint8_t *)&(LIST_ELEM)->next - offsetof(STRUCT, MEMBER.next)))
-
-/* Returns true if value A is less than value B, false
-   otherwise. */
-static bool
-tick_less(const struct list_elem *a_, const struct list_elem *b_,
-		  void *aux UNUSED)
-{
-	const struct thread *a = list_entry(a_, struct thread, elem);
-	const struct thread *b = list_entry(b_, struct thread, elem);
-
-	return a->wake_up_ticks < b->wake_up_ticks;
-}
