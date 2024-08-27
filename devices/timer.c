@@ -37,8 +37,7 @@ static intr_handler_func timer_interrupt;
 static bool too_many_loops(unsigned loops);
 static void busy_wait(int64_t loops);
 static void real_time_sleep(int64_t num, int32_t denom);
-static bool tick_less (const struct list_elem *, const struct list_elem *,
-                        void *); //wake_up_time? 기준으로 정렬하는 함수
+static bool wake_up_ticks_less (const struct list_elem *a_, const struct list_elem *b_,void *aux UNUSED) ;
 
 /* Sets up the 8254 Programmable Interval Timer (PIT) to
    interrupt PIT_FREQ times per second, and registers the
@@ -103,29 +102,37 @@ timer_elapsed(int64_t then)
 	return timer_ticks() - then;
 }
 
+static bool
+wake_up_ticks_less (const struct list_elem *a_, const struct list_elem *b_,
+            void *aux UNUSED) 
+{
+  const struct thread *a = list_entry (a_, struct thread, elem);
+  const struct thread *b = list_entry (b_, struct thread, elem);
+  
+  return a->wake_up_ticks < b->wake_up_ticks;
+}
+
 /* Suspends execution for approximately TICKS timer ticks. */
 void timer_sleep(int64_t ticks)
 {
-	if( ticks < 0 )
-		return;
-
 	int64_t start = timer_ticks();
-
 	ASSERT(intr_get_level() == INTR_ON);
 	
-	struct thread *t = thread_current();
-	enum intr_level old_level;
-	old_level = intr_disable();  // disable interrupt and return prev intrrupt status
+	// 예외 처리
+	if (ticks <= 0) {
+		return;
+	}
 
-	// current thread의 wake_up_ticks를 초기화.
-	t->wake_up_ticks = start + ticks;
+	struct thread *current_thread = thread_current();
+	enum intr_level old_level = intr_disable(); // 현재 인터럽트 레벨 저장하고 비활성화 
 
-	// sleep list에 thread 추가-> void *aux에 wake_up_ticks를 넣음
-	list_insert_ordered(&sleep_list, &t->elem, tick_less, NULL);	
+	current_thread->wake_up_ticks = start + ticks; // 스레드를 unblock시켜야 하는 ticks를 계산해 스레드의 멤버 변수 wake_up_ticks에 저장
 
-	thread_block(); // thread_block은 interrupt가 OFF된 상태일 때 가능하다.
+	list_insert_ordered(&sleep_list, &current_thread->elem, wake_up_ticks_less, NULL); // wake_up_ticks를 기준으로 오름차순 정렬하여 sleep_list에 스레드 삽입
 
-	intr_set_level(old_level); // interrupt status 복원
+	thread_block(); // 스레드를 sleep 상태로 전환
+
+	intr_set_level(old_level); // 인터럽트 레벨 복구
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -157,6 +164,7 @@ static void
 timer_interrupt(struct intr_frame *args UNUSED)
 {
 	ticks++;
+
 	// Search target of wake_up_thread from sleep list 
 	struct list_elem *e = list_begin(&sleep_list);
     while (e != list_end(&sleep_list))
@@ -164,7 +172,7 @@ timer_interrupt(struct intr_frame *args UNUSED)
 		//Get start adderess of thread t from element addr
         struct thread *t = list_entry(e, struct thread, elem); 
 		
-        if (timer_ticks() < t->wake_up_ticks)
+        if (ticks < t->wake_up_ticks)
             break;  // Assume sorting list
 
 		/* Makes thread unblocock if timer_ticks() >=  thread->wake_up_ticks*/
@@ -173,7 +181,7 @@ timer_interrupt(struct intr_frame *args UNUSED)
         thread_unblock(t); // use unblock func
     }
 	
-	
+
 	thread_tick();
 }
 
