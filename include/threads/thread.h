@@ -92,6 +92,7 @@ struct thread
 	enum thread_status status; /* Thread state. */
 	char name[16];			   /* Name (for debugging purposes). */
 	int priority;			   /* Priority. */
+	int origin_priority;			   /* Origin_Priority.*/
 	int64_t wake_up_ticks;	   /* Compare ticks to unblock */
 
 	/* Shared between thread.c and synch.c. */
@@ -137,6 +138,9 @@ void thread_yield(void);
 
 int thread_get_priority(void);
 void thread_set_priority(int);
+
+void thread_donate_priority(void);
+void thread_recover_priority(void);
 
 int thread_get_nice(void);
 void thread_set_nice(int);
