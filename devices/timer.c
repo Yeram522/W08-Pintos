@@ -39,6 +39,7 @@ static void busy_wait(int64_t loops);
 static void real_time_sleep(int64_t num, int32_t denom);
 static bool wake_up_ticks_less (const struct list_elem *a_, const struct list_elem *b_,void *aux UNUSED) ;
 
+
 /* Sets up the 8254 Programmable Interval Timer (PIT) to
    interrupt PIT_FREQ times per second, and registers the
    corresponding interrupt. */
@@ -248,14 +249,3 @@ real_time_sleep(int64_t num, int32_t denom)
 	}
 }
 
-/* Returns true if value A is less than value B, false
-   otherwise. */
-static bool
-tick_less (const struct list_elem *a_, const struct list_elem *b_,
-            void *aux UNUSED) 
-{
-  const struct thread *a = list_entry (a_, struct thread, elem);
-  const struct thread *b = list_entry (b_, struct thread, elem);
-  
-  return a->wake_up_ticks < b->wake_up_ticks;
-}
