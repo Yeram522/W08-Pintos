@@ -13,6 +13,7 @@
 #include "intrinsic.h"
 #ifdef USERPROG
 #include "userprog/process.h"
+#include "thread.h"
 #endif
 
 /* Random value for struct thread's `magic' member.
@@ -241,6 +242,7 @@ thread_unblock (struct thread *t) {
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
 	list_push_back (&ready_list, &t->elem);
+	//list_insert_ordered (&ready_list, &t->elem, less_value(), NULL); -> less_value() 새로 구현하기
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
 }
@@ -304,6 +306,7 @@ thread_yield (void) {
 	old_level = intr_disable ();
 	if (curr != idle_thread)
 		list_push_back (&ready_list, &curr->elem);
+		//list_insert_ordered (&ready_list, &t->elem, less_value(), NULL); -> less_value() 새로 구현하기
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
 }
@@ -312,12 +315,48 @@ thread_yield (void) {
 void
 thread_set_priority (int new_priority) {
 	thread_current ()->priority = new_priority;
+	/*enum intr_level old_level;
+	old_level = intr_disable ();
+
+	struct thread* t = thread_current ();
+	struct thread *start = list_entry (list_front (&ready_list), struct thread, elem);
+
+	//내가 기부받은 상태라면( priority ≠ original_priority) →  original_priority를 바꿔준다
+	if(t->priority != t->origin_priority)
+	{
+		t->origin_priority = new_priority;
+
+		return;
+	}
+
+	t->priority = new_priority;  // new_priority로 갱신
+
+	if(new_priority >= start->priority) return; // 만약 갱신된 우선순위가 대기큐의 우선순위보다 낮다면 CPU를 양보한다.
+
+	thread_yield();
+
+	intr_set_level (old_level);*/
 }
 
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) {
 	return thread_current ()->priority;
+}
+
+void 
+thread_donate_priority(void){
+	/*
+	acquire 함수를 호출했을 때 락의 owner인 스레드의 priority보다 acquire을 호출한 스레드의 priority가 크다면 
+	owner 스레드와 락의 waiter에 있는 모든 스레드에게 acquire을 호출한 스레드의 priority를 기부
+	*/
+}
+
+void 
+thread_recover_priority(void)
+{
+	//if (priority != origin_priority) 면 아래줄 실행
+	// priority = original_priority
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -408,6 +447,7 @@ init_thread (struct thread *t, const char *name, int priority) {
 	strlcpy (t->name, name, sizeof t->name);
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
+	t->origin_priority = priority;
 	t->magic = THREAD_MAGIC;
 }
 
