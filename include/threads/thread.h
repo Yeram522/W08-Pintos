@@ -142,6 +142,7 @@ void thread_set_priority(int);
 void thread_donate_priority(void);
 void thread_recover_priority(void);
 
+
 int thread_get_nice(void);
 void thread_set_nice(int);
 int thread_get_recent_cpu(void);

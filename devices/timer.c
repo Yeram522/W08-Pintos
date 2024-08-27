@@ -181,7 +181,6 @@ timer_interrupt(struct intr_frame *args UNUSED)
 
         thread_unblock(t); // use unblock func
     }
-	
 
 	thread_tick();
 }
