@@ -74,6 +74,15 @@ static tid_t allocate_tid (void);
  * somewhere in the middle, this locates the curent thread. */
 #define running_thread() ((struct thread *) (pg_round_down (rrsp ())))
 
+static bool
+priority_value_large (const struct list_elem *a_, const struct list_elem *b_,
+            void *aux UNUSED) 
+{
+  const struct thread *a = list_entry (a_, struct thread, elem);
+  const struct thread *b = list_entry (b_, struct thread, elem);
+  
+  return a->priority > b->priority;
+}
 
 // Global descriptor table for the thread_start.
 // Because the gdt will be setup after the thread_init, we should
@@ -204,9 +213,10 @@ thread_create (const char *name, int priority,
 	t->tf.ss = SEL_KDSEG;
 	t->tf.cs = SEL_KCSEG;
 	t->tf.eflags = FLAG_IF;
+	
+	
+	thread_check_priority_and_run(t);
 
-	/* Add to run queue. */
-	thread_unblock (t);
 
 	return tid;
 }
@@ -241,8 +251,7 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
-	//list_insert_ordered (&ready_list, &t->elem, less_value(), NULL); -> less_value() 새로 구현하기
+	list_insert_ordered (&ready_list, &t->elem, priority_value_large , NULL);
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
 }
@@ -305,8 +314,7 @@ thread_yield (void) {
 
 	old_level = intr_disable ();
 	if (curr != idle_thread)
-		list_push_back (&ready_list, &curr->elem);
-		//list_insert_ordered (&ready_list, &t->elem, less_value(), NULL); -> less_value() 새로 구현하기
+		list_insert_ordered (&ready_list, &curr->elem, priority_value_large , NULL);
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
 }
@@ -314,20 +322,20 @@ thread_yield (void) {
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
-	/*enum intr_level old_level;
+	//thread_current ()->priority = new_priority;
+	enum intr_level old_level;
 	old_level = intr_disable ();
 
 	struct thread* t = thread_current ();
 	struct thread *start = list_entry (list_front (&ready_list), struct thread, elem);
 
 	//내가 기부받은 상태라면( priority ≠ original_priority) →  original_priority를 바꿔준다
-	if(t->priority != t->origin_priority)
-	{
-		t->origin_priority = new_priority;
+	// if(t->priority != t->origin_priority)
+	// {
+	// 	t->origin_priority = new_priority;
 
-		return;
-	}
+	// 	return;
+	// }
 
 	t->priority = new_priority;  // new_priority로 갱신
 
@@ -335,7 +343,32 @@ thread_set_priority (int new_priority) {
 
 	thread_yield();
 
-	intr_set_level (old_level);*/
+	intr_set_level (old_level);
+}
+
+void thread_check_priority_and_run(struct thread * newthread)
+{
+	struct thread *curr = thread_current ();
+	enum intr_level old_level;
+
+	ASSERT (!intr_context ());
+
+	old_level = intr_disable ();
+
+	if(thread_get_priority() < newthread->priority) // 들어온 우선순위가 현재 우선순위보다 클 때
+	{
+		if (curr != idle_thread)
+			list_insert_ordered (&ready_list, &curr->elem, priority_value_large , NULL);
+		curr->status = THREAD_READY; //현재를 레디로 만들어주고 다시 스케쥴링!
+		list_insert_ordered (&ready_list, &newthread->elem, priority_value_large , NULL);
+		schedule() ;
+	}
+	else{
+		/* Add to run queue. */
+		thread_unblock (newthread);
+	}
+
+	intr_set_level (old_level);
 }
 
 /* Returns the current thread's priority. */
