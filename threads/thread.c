@@ -215,8 +215,10 @@ thread_create (const char *name, int priority,
 	t->tf.eflags = FLAG_IF;
 	
 	
-	thread_check_priority_and_run(t);
+	thread_unblock (t);
 
+	if(thread_get_priority() < t->priority && t != idle_thread) 
+		thread_yield();
 
 	return tid;
 }
@@ -322,7 +324,6 @@ thread_yield (void) {
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
-
 	struct thread* t = thread_current ();
 	struct thread *start = list_entry (list_front (&ready_list), struct thread, elem);
 
@@ -340,31 +341,6 @@ thread_set_priority (int new_priority) {
 
 	thread_yield(); 
 
-}
-
-void thread_check_priority_and_run(struct thread * newthread)
-{
-	struct thread *curr = thread_current ();
-	enum intr_level old_level;
-
-	ASSERT (!intr_context ());
-
-	old_level = intr_disable ();
-
-	if(thread_get_priority() < newthread->priority) // 들어온 우선순위가 현재 우선순위보다 클 때
-	{
-		if (curr != idle_thread)
-			list_insert_ordered (&ready_list, &curr->elem, priority_value_large , NULL);
-		curr->status = THREAD_READY; //현재를 레디로 만들어주고 다시 스케쥴링!
-		list_insert_ordered (&ready_list, &newthread->elem, priority_value_large , NULL);
-		schedule() ;
-	}
-	else{
-		/* Add to run queue. */
-		thread_unblock (newthread);
-	}
-
-	intr_set_level (old_level);
 }
 
 /* Returns the current thread's priority. */

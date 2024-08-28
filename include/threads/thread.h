@@ -139,8 +139,6 @@ void thread_yield(void);
 int thread_get_priority(void);
 void thread_set_priority(int);
 
-void thread_check_priority_and_run(struct thread*);// <Yeram522> 함수이름 고민중..우선순위 체크 후 스케줄링
-
 void thread_donate_priority(void);
 void thread_recover_priority(void);
 
