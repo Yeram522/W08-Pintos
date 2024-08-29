@@ -66,7 +66,7 @@ sema_down (struct semaphore *sema) {
 
 	old_level = intr_disable ();
 	while (sema->value == 0) {
-		list_push_back (&sema->waiters, &thread_current ()->elem);
+		list_insert_ordered (&sema->waiters, &thread_current()->elem, priority_value_large , NULL);
 		thread_block ();
 	}
 	sema->value--;
@@ -188,13 +188,16 @@ lock_acquire (struct lock *lock) {
 	ASSERT (!intr_context ());
 	ASSERT (!lock_held_by_current_thread (lock));
 
-	// if (lock->holder->priority < thread_current ()->priority) {
-	// 	thread_donate_priority();
-	// }
+	if (lock->holder!=NULL && lock->holder->priority < thread_get_priority()) {
+		//thread_donate_priority();
+		lock->holder->priority  = thread_get_priority();
+	}
+
 	sema_down (&lock->semaphore);
-	thread_recover_priority();
 
 	lock->holder = thread_current ();
+
+	list_push_back(&lock->holder->locks, &lock->elem);
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -227,8 +230,24 @@ lock_release (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (lock_held_by_current_thread (lock));
 
+	struct thread *t = thread_current();
+	thread_recover_priority();
+	if (t->priority != t->origin_priority && list_size(&t->locks) > 1){ // <Yeram522> && t->priority != t->origin_priority
+		t->priority = list_entry(list_front(&list_entry(list_max_test(&t->locks, priority_greater,NULL),struct lock, elem)->semaphore.waiters),struct thread,elem)->priority;
+	}
+	else{
+		t->priority = t->origin_priority;
+	}
+
+	//t->priority = t->origin_priority; //<Yeram522> 이것만 쓰면 donate_one 통과
+
 	lock->holder = NULL;
+
+	list_remove(&lock->elem);
+
 	sema_up (&lock->semaphore);
+
+	thread_yield();
 }
 
 /* Returns true if the current thread holds LOCK, false

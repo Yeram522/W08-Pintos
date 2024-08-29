@@ -74,7 +74,7 @@ static tid_t allocate_tid (void);
  * somewhere in the middle, this locates the curent thread. */
 #define running_thread() ((struct thread *) (pg_round_down (rrsp ())))
 
-static bool
+bool
 priority_value_large (const struct list_elem *a_, const struct list_elem *b_,
             void *aux UNUSED) 
 {
@@ -82,6 +82,18 @@ priority_value_large (const struct list_elem *a_, const struct list_elem *b_,
   const struct thread *b = list_entry (b_, struct thread, elem);
   
   return a->priority > b->priority;
+}
+
+bool priority_greater(const struct list_elem *a_, const struct list_elem *b_,
+            void *aux UNUSED)
+{
+	const struct lock *a = list_entry (a_, struct lock, elem);
+  	const struct lock *b = list_entry (b_, struct lock, elem);
+
+	int lock_priority_a = list_entry(list_front(&a->semaphore.waiters), struct thread,elem)->priority;
+	int lock_priority_b = list_entry(list_front(&b->semaphore.waiters), struct thread,elem)->priority;
+
+    return lock_priority_a > lock_priority_b;
 }
 
 // Global descriptor table for the thread_start.
@@ -119,7 +131,7 @@ thread_init (void) {
 	lock_init (&tid_lock);
 	list_init (&ready_list);
 	list_init (&destruction_req);
-
+	
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread ();
 	init_thread (initial_thread, "main", PRI_DEFAULT);
@@ -217,7 +229,7 @@ thread_create (const char *name, int priority,
 	
 	thread_unblock (t);
 
-	if(thread_get_priority() < t->priority && t != idle_thread) 
+	if(thread_get_priority() < t->priority && !list_empty (&ready_list)) 
 		thread_yield();
 
 	return tid;
@@ -309,7 +321,7 @@ thread_exit (void) {
    may be scheduled again immediately at the scheduler's whim. */
 void
 thread_yield (void) {
-	struct thread *curr = thread_current ();
+	struct thread *curr = thread_current();
 	enum intr_level old_level;
 
 	ASSERT (!intr_context ());
@@ -325,19 +337,18 @@ thread_yield (void) {
 void
 thread_set_priority (int new_priority) {
 	struct thread* t = thread_current ();
-	struct thread *start = list_entry (list_front (&ready_list), struct thread, elem);
 
 	//내가 기부받은 상태라면( priority ≠ original_priority) →  original_priority를 바꿔준다
-	// if(t->priority != t->origin_priority)
-	// {
-	// 	t->origin_priority = new_priority;
+	if(t->priority != t->origin_priority)
+	{
+	 	t->origin_priority = new_priority;
 
-	// 	return;
-	// }
+	 	return;
+	}
 
 	t->priority = new_priority;  // new_priority로 갱신
 
-	if(thread_get_priority() >= start->priority) return; // 만약 갱신된 우선순위가 대기큐의 우선순위보다 낮다면 CPU를 양보한다.
+	if(!list_empty(&ready_list) && thread_get_priority() >= list_entry (list_front (&ready_list), struct thread, elem)->priority) return; // 만약 갱신된 우선순위가 대기큐의 우선순위보다 낮다면 CPU를 양보한다.
 
 	thread_yield(); 
 
@@ -355,13 +366,16 @@ thread_donate_priority(void){
 	acquire 함수를 호출했을 때 락의 owner인 스레드의 priority보다 acquire을 호출한 스레드의 priority가 크다면 
 	owner 스레드와 락의 waiter에 있는 모든 스레드에게 acquire을 호출한 스레드의 priority를 기부
 	*/
+	
 }
 
 void 
 thread_recover_priority(void)
 {
-	//if (priority != origin_priority) 면 아래줄 실행
-	// priority = original_priority
+	// struct thread  *t = lock->holder;
+	// if (t->priority != t->origin_priority) 
+	// 	thread_set_priority(t->origin_priority);
+	
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -453,6 +467,7 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
 	t->origin_priority = priority;
+	list_init (&t->locks);
 	t->magic = THREAD_MAGIC;
 }
 
@@ -632,4 +647,19 @@ allocate_tid (void) {
 	lock_release (&tid_lock);
 
 	return tid;
+}
+
+struct list_elem *
+list_max_test (struct list *list, list_less_func *less, void *aux) {
+	struct list_elem *max = list_begin (list);
+	if (max != list_end (list)) {
+		struct list_elem *e;
+
+		for (e = list_next (max); e != list_end (list); e = list_next (e)){
+			if(list_empty(&list_entry(e, struct lock,elem)->semaphore.waiters)) continue;
+			if (less (max, e, aux))
+				max = e;
+		}			
+	}
+	return max;
 }
