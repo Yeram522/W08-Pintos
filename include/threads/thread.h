@@ -94,7 +94,9 @@ struct thread
 	int priority;			   /* Priority. */
 	int origin_priority;			   /* Origin_Priority.*/
 	int64_t wake_up_ticks;	   /* Compare ticks to unblock */
-	struct list locks;			/*List of locks thread have*/	
+	struct list locks;			/*List of locks thread have*/
+	struct lock *waiting_lock; /*Lock thread waiting*/
+
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem; /* List element. */
 
