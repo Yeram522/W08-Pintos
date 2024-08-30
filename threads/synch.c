@@ -109,11 +109,14 @@ sema_up (struct semaphore *sema) {
 	ASSERT (sema != NULL);
 
 	old_level = intr_disable ();
-	if (!list_empty (&sema->waiters))
+	if (!list_empty (&sema->waiters)){
 		thread_unblock (list_entry (list_pop_front (&sema->waiters),
 					struct thread, elem));
+	}
 	sema->value++;
+
 	intr_set_level (old_level);
+	thread_yield();
 }
 
 static void sema_test_helper (void *sema_);
@@ -208,7 +211,7 @@ lock_acquire (struct lock *lock) {
 			}
 
 			// lock_holder의 우선순위를 바뀐 우선순위로 재기부.
-			lock_holder->waiting_lock->holder->priority = recursion_priority;
+			lock_holder->waiting_lock->holder->priority = recursion_priority;// 우선순위 재기부가->원본값이 바뀌어야함.
 
 			// 재귀적 탐색을 위한 lock 갱신.
 			recursion_lock = lock_holder->waiting_lock;
@@ -262,8 +265,10 @@ lock_release (struct lock *lock) {
 	list_remove(&lock->elem); // <all> 우선순위를 변경하기 전에 리스트에서 선삭제 해야함.
 
 	// <all> 삭제 했기 때문에 list의 empty 체크를 해야한다.
-	if (t->priority != t->origin_priority && !list_empty(&t->locks)){ // <Yeram522> && t->priority != t->origin_priority
-		t->priority = list_entry(list_front(&list_entry(list_max_test(&t->locks, priority_greater,NULL),struct lock, elem)->semaphore.waiters),struct thread,elem)->priority;
+	if ( !list_empty(&t->locks) && t->priority != t->origin_priority){ // <Yeram522> && t->priority != t->origin_priority
+		t->priority = list_entry(
+			list_front(&list_entry(list_max_test(&t->locks, priority_greater,NULL),struct lock, elem)
+			->semaphore.waiters),struct thread,elem)->priority;
 	}
 	else{
 		t->priority = t->origin_priority;
@@ -273,7 +278,7 @@ lock_release (struct lock *lock) {
 
 	sema_up (&lock->semaphore);
 
-	thread_yield();
+	//thread_yield();
 }
 
 /* Returns true if the current thread holds LOCK, false

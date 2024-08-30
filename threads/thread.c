@@ -229,7 +229,7 @@ thread_create (const char *name, int priority,
 	
 	thread_unblock (t);
 
-	if(thread_get_priority() < t->priority && !list_empty (&ready_list)) 
+	if(thread_get_priority() < t->priority) 
 		thread_yield();
 
 	return tid;
@@ -338,17 +338,19 @@ void
 thread_set_priority (int new_priority) {
 	struct thread* t = thread_current ();
 
-	//내가 기부받은 상태라면( priority ≠ original_priority) →  original_priority를 바꿔준다
-	if(t->priority != t->origin_priority)
-	{
-	 	t->origin_priority = new_priority;
+	t->origin_priority = new_priority;
 
+	//내가 기부받은 상태라면( priority ≠ original_priority) →  original_priority를 바꿔준다
+	if(!list_empty(&t->locks))
+	{
 	 	return;
 	}
 
 	t->priority = new_priority;  // new_priority로 갱신
-
-	if(!list_empty(&ready_list) && thread_get_priority() >= list_entry (list_front (&ready_list), struct thread, elem)->priority) return; // 만약 갱신된 우선순위가 대기큐의 우선순위보다 낮다면 CPU를 양보한다.
+	
+	if(!list_empty(&ready_list) && thread_get_priority() 
+									>= list_entry (list_front (&ready_list), struct thread, elem)->priority)
+		return; // 만약 갱신된 우선순위가 대기큐의 우선순위보다 낮다면 CPU를 양보한다.
 
 	thread_yield(); 
 
