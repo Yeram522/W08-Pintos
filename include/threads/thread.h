@@ -94,6 +94,8 @@ struct thread
 	int priority;			   /* Priority. */
 	int origin_priority;			   /* Origin_Priority.*/
 	int64_t wake_up_ticks;	   /* Compare ticks to unblock */
+	struct list locks;			/*List of locks thread have*/
+	struct lock *waiting_lock; /*Lock thread waiting*/
 
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem; /* List element. */
@@ -117,6 +119,14 @@ struct thread
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
 
+bool
+priority_value_greater (const struct list_elem *a_, const struct list_elem *b_,
+            void *aux UNUSED) ;
+
+bool
+lock_priority_greater (const struct list_elem *a_, const struct list_elem *b_,
+            void *aux UNUSED) ;
+
 void thread_init(void);
 void thread_start(void);
 
@@ -139,8 +149,8 @@ void thread_yield(void);
 int thread_get_priority(void);
 void thread_set_priority(int);
 
-void thread_donate_priority(void);
-void thread_recover_priority(void);
+void thread_donate_priority(struct lock*);
+void thread_recover_priority(struct lock*);
 
 
 int thread_get_nice(void);
@@ -150,4 +160,5 @@ int thread_get_load_avg(void);
 
 void do_iret(struct intr_frame *tf);
 
+struct list_elem * list_max_with_empty_check (struct list *list, list_less_func *less, void *aux); // <Yeram522> Test용 max priority code
 #endif /* threads/thread.h */
