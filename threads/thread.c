@@ -75,23 +75,21 @@ static tid_t allocate_tid (void);
 #define running_thread() ((struct thread *) (pg_round_down (rrsp ())))
 
 bool
-priority_value_large (const struct list_elem *a_, const struct list_elem *b_,
-            void *aux UNUSED) 
-{
+priority_value_greater (const struct list_elem *a_, const struct list_elem *b_,
+            void *aux UNUSED){
   const struct thread *a = list_entry (a_, struct thread, elem);
   const struct thread *b = list_entry (b_, struct thread, elem);
   
   return a->priority > b->priority;
 }
 
-bool priority_greater(const struct list_elem *a_, const struct list_elem *b_,
-            void *aux UNUSED)
-{
+bool lock_priority_greater(const struct list_elem *a_, const struct list_elem *b_,
+            void *aux UNUSED){
 	const struct lock *a = list_entry (a_, struct lock, elem);
   	const struct lock *b = list_entry (b_, struct lock, elem);
 
-	int lock_priority_a = list_entry(list_front(&a->semaphore.waiters), struct thread,elem)->priority;
-	int lock_priority_b = list_entry(list_front(&b->semaphore.waiters), struct thread,elem)->priority;
+	const int lock_priority_a = list_entry(list_begin(&a->semaphore.waiters), struct thread,elem)->priority;
+	const int lock_priority_b = list_entry(list_begin(&b->semaphore.waiters), struct thread,elem)->priority;
 
     return lock_priority_a > lock_priority_b;
 }
@@ -265,7 +263,7 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_insert_ordered (&ready_list, &t->elem, priority_value_large , NULL);
+	list_insert_ordered (&ready_list, &t->elem, priority_value_greater , NULL);
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
 }
@@ -328,7 +326,7 @@ thread_yield (void) {
 
 	old_level = intr_disable ();
 	if (curr != idle_thread)
-		list_insert_ordered (&ready_list, &curr->elem, priority_value_large , NULL);
+		list_insert_ordered (&ready_list, &curr->elem, priority_value_greater , NULL);
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
 }
@@ -352,7 +350,7 @@ thread_set_priority (int new_priority) {
 
 	if (t->priority < old_priority && !list_empty(&ready_list))
 	{
-		struct thread *front = list_entry (list_front (&ready_list), struct thread, elem);
+		struct thread *front = list_entry (list_begin (&ready_list), struct thread, elem);
 		if (front -> priority > t -> priority)
 		{
 			thread_yield();
@@ -369,21 +367,49 @@ thread_get_priority (void) {
 }
 
 void 
-thread_donate_priority(void){
-	/*
-	acquire 함수를 호출했을 때 락의 owner인 스레드의 priority보다 acquire을 호출한 스레드의 priority가 크다면 
-	owner 스레드와 락의 waiter에 있는 모든 스레드에게 acquire을 호출한 스레드의 priority를 기부
-	*/
-	
+thread_donate_priority(struct lock* lock){
+
+	if (lock->holder == NULL || lock->holder->priority >= thread_get_priority()) {
+		return;
+	}
+
+	recursion_nested_donate(lock, thread_get_priority());
 }
 
 void 
-thread_recover_priority(void)
-{
-	// struct thread  *t = lock->holder;
-	// if (t->priority != t->origin_priority) 
-	// 	thread_set_priority(t->origin_priority);
-	
+recursion_nested_donate (struct lock *lock, int new_priority) {
+    if(lock->holder ==NULL || lock->holder->priority >= new_priority) {
+        return;
+    }
+    lock->holder->priority = new_priority;
+    if (lock ->holder->waiting_lock == NULL){
+        return;
+    }
+    struct lock *recursion_lock = lock->holder->waiting_lock;
+    list_sort(&recursion_lock->semaphore.waiters, lock_priority_greater, NULL);
+    struct thread *highest_priority_thread = list_entry
+        (list_begin(&recursion_lock->semaphore.waiters),
+        struct thread,
+        elem
+    );
+    recursion_nested_donate(recursion_lock, highest_priority_thread->priority);
+}
+
+void 
+thread_recover_priority(struct lock *lock){
+	struct thread *t = thread_current();
+
+	list_remove(&lock->elem); // <all> 우선순위를 변경하기 전에 리스트에서 선삭제 해야함.
+
+	// <all> 삭제 했기 때문에 list의 empty 체크를 해야한다.
+	if ( !list_empty(&t->locks) && t->priority != t->origin_priority){ // <Yeram522> && t->priority != t->origin_priority
+		t->priority = list_entry(
+			list_begin(&list_entry(list_max_with_empty_check(&t->locks, lock_priority_greater,NULL),struct lock, elem)
+			->semaphore.waiters),struct thread,elem)->priority;
+	}
+	else{
+		t->priority = t->origin_priority;
+	}
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -658,7 +684,7 @@ allocate_tid (void) {
 }
 
 struct list_elem *
-list_max_test (struct list *list, list_less_func *less, void *aux) {
+list_max_with_empty_check (struct list *list, list_less_func *less, void *aux) {
 	struct list_elem *max = list_begin (list);
 	if (max != list_end (list)) {
 		struct list_elem *e;
