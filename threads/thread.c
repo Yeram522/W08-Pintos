@@ -415,7 +415,13 @@ thread_recover_priority(struct lock *lock){
 /* Sets the current thread's nice value to NICE. */
 void
 thread_set_nice (int nice UNUSED) {
-	/* TODO: Your implementation goes here */
+	enum intr_level old_level = intr_disable ();
+
+	struct thread* t = thread_current ();
+
+	t-> nice = nice;
+	
+	intr_set_level (old_level);
 }
 
 /* Returns the current thread's nice value. */
@@ -503,6 +509,8 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->origin_priority = priority;
 	list_init (&t->locks);
 	t->magic = THREAD_MAGIC;
+	t->nice = running_thread() -> nice;
+	t->recent_cpu = running_thread()-> recent_cpu;
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should

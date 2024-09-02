@@ -96,6 +96,8 @@ struct thread
 	int64_t wake_up_ticks;	   /* Compare ticks to unblock */
 	struct list locks;			/*List of locks thread have*/
 	struct lock *waiting_lock; /*Lock thread waiting*/
+	int nice;
+	int recent_cpu;
 
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem; /* List element. */
