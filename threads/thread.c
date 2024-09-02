@@ -29,6 +29,8 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
+static struct list all_thread_list;
+
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -49,6 +51,7 @@ static long long user_ticks;    /* # of timer ticks in user programs. */
 /* Scheduling. */
 #define TIME_SLICE 4            /* # of timer ticks to give each thread. */
 static unsigned thread_ticks;   /* # of timer ticks since last yield. */
+static int load_avg;
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -129,10 +132,12 @@ thread_init (void) {
 	lock_init (&tid_lock);
 	list_init (&ready_list);
 	list_init (&destruction_req);
+	list_init (&all_thread_list);
 	
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread ();
 	init_thread (initial_thread, "main", PRI_DEFAULT);
+	list_push_back(&all_thread_list, &initial_thread->thread_elem);
 	initial_thread->status = THREAD_RUNNING;
 	initial_thread->tid = allocate_tid ();
 }
@@ -224,6 +229,7 @@ thread_create (const char *name, int priority,
 	t->tf.cs = SEL_KCSEG;
 	t->tf.eflags = FLAG_IF;
 	
+	list_push_back(&all_thread_list, &t->thread_elem);
 	
 	thread_unblock (t);
 
@@ -311,6 +317,7 @@ thread_exit (void) {
 	/* Just set our status to dying and schedule another process.
 	   We will be destroyed during the call to schedule_tail(). */
 	intr_disable ();
+	list_remove(&thread_current()->thread_elem);
 	do_schedule (THREAD_DYING);
 	NOT_REACHED ();
 }
@@ -334,6 +341,9 @@ thread_yield (void) {
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
+
+	if(thread_mlfqs)
+		return;
 
 	enum intr_level old_level = intr_disable ();
 
@@ -427,22 +437,55 @@ thread_set_nice (int nice UNUSED) {
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) {
-	/* TODO: Your implementation goes here */
-	return 0;
+	return thread_current()->nice;
 }
 
 /* Returns 100 times the system load average. */
-int
-thread_get_load_avg (void) {
-	/* TODO: Your implementation goes here */
-	return 0;
+void
+set_load_avg (void) 
+{
+  int ready_threads = list_size (&ready_list);
+  if (thread_current () != idle_thread) 
+    ready_threads++;
+  load_avg = FP_MUL (INT_TO_FP (59) / 60, load_avg) 
+           + INT_TO_FP (ready_threads) / 60;
 }
+
+int
+thread_get_load_avg (void) 
+{
+  return FP_TO_INT_ROUND (FP_MUL (load_avg, INT_TO_FP (100)));
+}
+
+void 
+thread_set_mlfqs_priority(void){
+	for (struct list_elem* e = list_begin(&all_thread_list); e != list_end(&all_thread_list); e = list_next(e)) {
+		struct thread*  t=  list_entry(list_begin(&all_thread_list), struct thread, thread_elem);
+		t->priority =FP_SUB(FP_SUB(PRI_MAX * F, (t->recent_cpu / 4)), (t->nice * 2));
+		if(t->priority < 0) {
+			t->priority = 0;
+		} else if (t->priority > 63) {
+			t->priority = 63;
+		}
+	}
+	list_sort(&ready_list, priority_value_greater, NULL);
+}
+
+void
+set_recent_cpu(){
+	for (struct list_elem* e = list_begin(&all_thread_list); e != list_end(&all_thread_list); e = list_next(e)) {
+		struct thread*  t=  list_entry(list_begin(&all_thread_list), struct thread, thread_elem);
+		t->recent_cpu =FP_ADD(FP_DIV(2 * load_avg, FP_ADD(2 * load_avg, 1)) * t->recent_cpu, t->nice);
+	}
+}
+
+
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) {
 	/* TODO: Your implementation goes here */
-	return 0;
+	return FP_TO_INT_ROUND(thread_current()->recent_cpu/F * 100);
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -508,9 +551,9 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->priority = priority;
 	t->origin_priority = priority;
 	list_init (&t->locks);
+	t->nice = 0;
+	t->recent_cpu = 0;
 	t->magic = THREAD_MAGIC;
-	t->nice = running_thread() -> nice;
-	t->recent_cpu = running_thread()-> recent_cpu;
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
@@ -705,3 +748,4 @@ list_max_with_empty_check (struct list *list, list_less_func *less, void *aux) {
 	}
 	return max;
 }
+

@@ -92,12 +92,14 @@ struct thread
 	enum thread_status status; /* Thread state. */
 	char name[16];			   /* Name (for debugging purposes). */
 	int priority;			   /* Priority. */
-	int origin_priority;			   /* Origin_Priority.*/
+	int origin_priority;	   /* Origin_Priority.*/
 	int64_t wake_up_ticks;	   /* Compare ticks to unblock */
-	struct list locks;			/*List of locks thread have*/
+	struct list locks;		   /*List of locks thread have*/
 	struct lock *waiting_lock; /*Lock thread waiting*/
 	int nice;
 	int recent_cpu;
+
+	struct list_elem thread_elem;
 
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem; /* List element. */
@@ -121,13 +123,11 @@ struct thread
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
 
-bool
-priority_value_greater (const struct list_elem *a_, const struct list_elem *b_,
-            void *aux UNUSED) ;
+bool priority_value_greater(const struct list_elem *a_, const struct list_elem *b_,
+							void *aux UNUSED);
 
-bool
-lock_priority_greater (const struct list_elem *a_, const struct list_elem *b_,
-            void *aux UNUSED) ;
+bool lock_priority_greater(const struct list_elem *a_, const struct list_elem *b_,
+						   void *aux UNUSED);
 
 void thread_init(void);
 void thread_start(void);
@@ -151,16 +151,28 @@ void thread_yield(void);
 int thread_get_priority(void);
 void thread_set_priority(int);
 
-void thread_donate_priority(struct lock*);
-void thread_recover_priority(struct lock*);
-
+void thread_donate_priority(struct lock *);
+void thread_recover_priority(struct lock *);
 
 int thread_get_nice(void);
 void thread_set_nice(int);
 int thread_get_recent_cpu(void);
 int thread_get_load_avg(void);
+void set_recent_cpu();
+void set_load_avg(void);
+void thread_set_mlfqs_priority(void);
 
 void do_iret(struct intr_frame *tf);
 
-struct list_elem * list_max_with_empty_check (struct list *list, list_less_func *less, void *aux); // <Yeram522> Test용 max priority code
+struct list_elem *list_max_with_empty_check(struct list *list, list_less_func *less, void *aux); // <Yeram522> Test용 max priority code
+
+#define F (1 << 14)
+#define INT_TO_FP(n) ((n) * F)
+#define FP_TO_INT(x) ((x) / F)
+#define FP_TO_INT_ROUND(x) (((x) >= 0 ? (x) + F / 2 : (x) - F / 2) / F)
+#define FP_ADD(x, y) ((x) + (y))
+#define FP_SUB(x, y) ((x) - (y))
+#define FP_MUL(x, y) (((int64_t) (x)) * (y) / F)
+#define FP_DIV(x, y) (((int64_t) (x)) * F / (y))
+
 #endif /* threads/thread.h */

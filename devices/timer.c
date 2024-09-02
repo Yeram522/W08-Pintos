@@ -22,7 +22,7 @@
 #define list_entry(LIST_ELEM, STRUCT, MEMBER)           \
 	((STRUCT *) ((uint8_t *) &(LIST_ELEM)->next     \
 		- offsetof (STRUCT, MEMBER.next)))
-
+#define TIMESLICE 4
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
 
@@ -181,6 +181,25 @@ timer_interrupt(struct intr_frame *args UNUSED)
 
         thread_unblock(t); // use unblock func
     }
+	// 타이머 인터럽트가 발생할 때마다 실행 중인 스레드만 recent_cpu가 1씩 증가
+	thread_current()->recent_cpu ++;
+
+	//모든 스레드(실행 중이든, ready상태거나 block되어 있는 것에 상관없이)의 recent_cpu 값이 다음의 공식을 사용하여 매 초마다 다시 계산
+	/* recent_cpu의 재계산은 시스템 틱 카운터가 1초의 배수에 도달했을 때 
+	즉, timer_ticks () % TIMER_FREQ == 0 일 때 정확하게 이루어져야하며 다른 어떤 시점에서도 이루어지면 안됩니다.*/
+	if(timer_ticks() % TIMER_FREQ == 0 && thread_mlfqs)  //per time
+	{
+
+		//set load avg
+		set_load_avg();
+
+		//cpu 재계산
+		set_recent_cpu(); //ready queue and waite queue
+	}
+
+	/*mlfqs : 모든 스레드에 대해 매 4번째 클록 틱마다 재계산됩니다. 우선순위 계산은 위의 공식에 따라 결정*/
+	if(timer_ticks() % TIMESLICE == 0 && thread_mlfqs)
+		thread_set_mlfqs_priority();
 
 	thread_tick();
 }
