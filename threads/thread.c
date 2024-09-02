@@ -46,9 +46,23 @@ static long long idle_ticks;    /* # of timer ticks spent idle. */
 static long long kernel_ticks;  /* # of timer ticks in kernel threads. */
 static long long user_ticks;    /* # of timer ticks in user programs. */
 
+static long long load_avg;
+
+#define F (1<<14) // 부동 소수점 연산을 위한 2^14
+#define READYQUEUE_CNT 64
+static struct ready_queue ready_queues[READYQUEUE_CNT];
+
 /* Scheduling. */
 #define TIME_SLICE 4            /* # of timer ticks to give each thread. */
 static unsigned thread_ticks;   /* # of timer ticks since last yield. */
+
+void
+readyqueue_init(void) {
+	for (int i=0; i<READYQUEUE_CNT; i++) {
+		list_init(&ready_queues[i]);
+		ready_queues[i].priority = i;
+	}
+}
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -129,6 +143,7 @@ thread_init (void) {
 	lock_init (&tid_lock);
 	list_init (&ready_list);
 	list_init (&destruction_req);
+	readyqueue_init();
 	
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread ();
@@ -414,28 +429,28 @@ thread_recover_priority(struct lock *lock){
 
 /* Sets the current thread's nice value to NICE. */
 void
-thread_set_nice (int nice UNUSED) {
-	/* TODO: Your implementation goes here */
+thread_set_nice (int nice) {
+	thread_current()->nice = nice;
+	// 우선순위가 밀리면 양보하는 것을 구현해야함
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) {
-	/* TODO: Your implementation goes here */
-	return 0;
+	return thread_current()->nice;
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) {
-	/* TODO: Your implementation goes here */
+	
 	return 0;
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) {
-	/* TODO: Your implementation goes here */
+	
 	return 0;
 }
 
@@ -502,6 +517,8 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->priority = priority;
 	t->origin_priority = priority;
 	list_init (&t->locks);
+	t->recent_cpu = 0; // mlfqs
+	t->nice = 0; // mlfqs
 	t->magic = THREAD_MAGIC;
 }
 

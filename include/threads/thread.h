@@ -96,6 +96,8 @@ struct thread
 	int64_t wake_up_ticks;	   /* Compare ticks to unblock */
 	struct list locks;			/*List of locks thread have*/
 	struct lock *waiting_lock; /*Lock thread waiting*/
+	int recent_cpu;
+	int nice; 
 
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem; /* List element. */
@@ -114,6 +116,11 @@ struct thread
 	unsigned magic;		  /* Detects stack overflow. */
 };
 
+static struct ready_queue {
+	struct list thread_list;
+	int priority;
+};
+
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
@@ -129,6 +136,8 @@ lock_priority_greater (const struct list_elem *a_, const struct list_elem *b_,
 
 void thread_init(void);
 void thread_start(void);
+
+void readyqueue_init(void);
 
 void thread_tick(void);
 void thread_print_stats(void);
