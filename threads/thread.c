@@ -51,6 +51,7 @@ static long long user_ticks;    /* # of timer ticks in user programs. */
 /* Scheduling. */
 #define TIME_SLICE 4            /* # of timer ticks to give each thread. */
 static unsigned thread_ticks;   /* # of timer ticks since last yield. */
+
 static int load_avg;
 
 /* If false (default), use round-robin scheduler.
@@ -76,6 +77,9 @@ static tid_t allocate_tid (void);
  * always at the beginning of a page and the stack pointer is
  * somewhere in the middle, this locates the curent thread. */
 #define running_thread() ((struct thread *) (pg_round_down (rrsp ())))
+
+#define F (1<<14)
+#define ROUND_TO_NEAREST(x) ((x) >= 0 ? ((x) + F / 2) / F : ((x) - F / 2) / F)
 
 bool
 priority_value_greater (const struct list_elem *a_, const struct list_elem *b_,
@@ -177,6 +181,9 @@ thread_tick (void) {
 	/* Enforce preemption. */
 	if (++thread_ticks >= TIME_SLICE)
 		intr_yield_on_return ();
+	/*mlfqs : 모든 스레드에 대해 매 4번째 클록 틱마다 재계산됩니다. 우선순위 계산은 위의 공식에 따라 결정*/
+	if(thread_ticks == TIME_SLICE)
+		thread_set_mlfqs_priority();
 }
 
 /* Prints thread statistics. */
@@ -370,6 +377,17 @@ thread_set_priority (int new_priority) {
 	intr_set_level (old_level);
 }
 
+void thread_set_mlfqs_priority(void)
+{
+	//새 값을 기반으로 스레드의 우선순위를 재계산합니다.
+	int old_priority = thread_get_priority();
+	thread_current()->priority = PRI_MAX - (thread_get_recent_cpu() / 4) - (thread_get_nice() * 2);
+
+	
+	list_remove(thread_current()); // 현재 있는 큐에서 제거
+	list_push_back(&ready_list_mlfqs[thread_current()->priority],thread_current()); // 새로 바뀐 우선순위 단계의 큐에 삽입.
+}
+
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) {
@@ -432,6 +450,7 @@ thread_set_nice (int nice UNUSED) {
 	t-> nice = nice;
 	
 	intr_set_level (old_level);
+
 }
 
 /* Returns the current thread's nice value. */
@@ -487,6 +506,31 @@ thread_get_recent_cpu (void) {
 	/* TODO: Your implementation goes here */
 	return FP_TO_INT_ROUND(thread_current()->recent_cpu/F * 100);
 }
+
+
+void thread_set_load_avg(void)
+{
+	/*ready threads는 업데이트 시점에 실행 중이거나 실행 준비된 스레드의 수를 의미합니다 (유휴 스레드(idle thread)는 포함하지 않습니다)*/
+	int ready_threads = thread_current() != idle_thread ? 1 : 0 ;
+
+	struct thread *t = list_begin(&ready_list);
+	while (t != list_end(&ready_list))
+	{
+		ready_threads ++;
+		t = list_next(t);
+	}
+	
+	load_avg = (59/60) * thread_get_load_avg() + (1/60) * ready_threads;
+}
+
+void thread_set_recent_cpu(void)
+{
+	if(thread_current() ==  idle_thread) return;
+	//	while ready,waiting
+	//recent_cpu = (2 * load_avg)/(2 * load_avg + 1) * recent_cpu + nice
+	//recent_cpu 를 t-id 로 계산가능?
+}
+
 
 /* Idle thread.  Executes when no other thread is ready to run.
 
@@ -554,6 +598,8 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->nice = 0;
 	t->recent_cpu = 0;
 	t->magic = THREAD_MAGIC;
+	t->nice = 0;
+	t->recent_cpu = 0;
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
