@@ -101,6 +101,9 @@ struct thread
 
 	struct list_elem thread_elem;
 
+	int nice; //mlfqs
+	int recent_cpu; //mlfqs
+	
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem; /* List element. */
 
@@ -150,6 +153,7 @@ void thread_yield(void);
 
 int thread_get_priority(void);
 void thread_set_priority(int);
+void thread_set_mlfqs_priority(void);
 
 void thread_donate_priority(struct lock *);
 void thread_recover_priority(struct lock *);
@@ -158,6 +162,7 @@ int thread_get_nice(void);
 void thread_set_nice(int);
 int thread_get_recent_cpu(void);
 int thread_get_load_avg(void);
+
 void set_recent_cpu();
 void set_load_avg(void);
 void thread_set_mlfqs_priority(void);
