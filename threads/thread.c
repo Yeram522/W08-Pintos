@@ -13,7 +13,7 @@
 #include "intrinsic.h"
 #ifdef USERPROG
 #include "userprog/process.h"
-#include "thread.h"
+#include "threads/thread.h"
 #endif
 
 /* Random value for struct thread's `magic' member.
@@ -76,6 +76,24 @@ static tid_t allocate_tid (void);
  * always at the beginning of a page and the stack pointer is
  * somewhere in the middle, this locates the curent thread. */
 #define running_thread() ((struct thread *) (pg_round_down (rrsp ())))
+
+void
+thread_preemption (void) {
+  enum intr_level old_level;
+  struct thread *curr = thread_current ();
+  struct thread *ready = list_entry (list_begin (&ready_list), struct thread, elem);
+  
+  if (list_empty(&ready_list))
+    return;
+
+  old_level = intr_disable ();
+
+  if (!intr_context() && curr->priority < ready->priority) {
+    thread_yield();
+  }
+
+  intr_set_level (old_level);
+}
 
 bool
 priority_value_greater (const struct list_elem *a_, const struct list_elem *b_,
@@ -234,7 +252,7 @@ thread_create (const char *name, int priority,
 	thread_unblock (t);
 
 	if(thread_get_priority() < t->priority) 
-		thread_yield();
+		thread_preemption();
 
 	return tid;
 }
@@ -257,7 +275,7 @@ thread_block (void) {
    This is an error if T is not blocked.  (Use thread_yield() to
    make the running thread ready.)
 
-   This function does not preempt the running thread.  This can
+   This function dFoes not preempt the running thread.  This can
    be important: if the caller had disabled interrupts itself,
    it may expect that it can atomically unblock a thread and
    update other data. */
@@ -363,7 +381,7 @@ thread_set_priority (int new_priority) {
 		struct thread *front = list_entry (list_begin (&ready_list), struct thread, elem);
 		if (front -> priority > t -> priority)
 		{
-			thread_yield();
+			thread_preemption();
 		}
 		
 	}

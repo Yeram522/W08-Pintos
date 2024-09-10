@@ -92,7 +92,7 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 	bool writable;
 
 	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
-
+	
 	/* 2. Resolve VA from the parent's page map level 4. */
 	parent_page = pml4_get_page (parent->pml4, va);
 
@@ -163,10 +163,12 @@ error:
 int
 process_exec (void *f_name) {
 	char *file_name = f_name;
+	char *pharse_file_name;
 	bool success;
 
 	/* We cannot use the intr_frame in the thread structure.
-	 * This is because when current thread rescheduled,
+	 * This is b
+ecause when current thread rescheduled,
 	 * it stores the execution information to the member. */
 	struct intr_frame _if;
 	_if.ds = _if.es = _if.ss = SEL_UDSEG;
@@ -175,15 +177,26 @@ process_exec (void *f_name) {
 
 	/* We first kill the current context */
 	process_cleanup ();
+	
+	memcpy(pharse_file_name, f_name, strlen(f_name)+1);
 
+	char *token, save_ptr;
+	int argc = 0; // argument count
+	char* argv[128];
+	for (token = strtok_r (pharse_file_name, " ", &save_ptr); token != NULL;
+       token = strtok_r (NULL, " ", &save_ptr)){
+        argv[argc ++] = token;
+    }
+	
 	/* And then load the binary */
-	success = load (file_name, &_if);
+	success = load (argv[0], &_if);
 
 	/* If load failed, quit. */
 	palloc_free_page (file_name);
 	if (!success)
 		return -1;
-
+	argument_stack(argv, argc, &_if);
+	//hex_dump(_if.rsp, _if.rsp, KERN_BASE - _if.rsp, true);
 	/* Start switched process. */
 	do_iret (&_if);
 	NOT_REACHED ();
@@ -204,6 +217,7 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+	while (1) {}
 	return -1;
 }
 
@@ -315,7 +329,41 @@ static bool validate_segment (const struct Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		uint32_t read_bytes, uint32_t zero_bytes,
 		bool writable);
+void argument_stack(char **argv, int argc, struct intr_frame *if_)
+{
+	char *arg_address[128];
 
+	for(int i = argc - 1; i >= 0; i--)
+	{
+		int len = strlen(argv[i]) + 1; //null 까지 추가해서 +1
+		if_->rsp -= len; // 인자 길이만큼 스택 늘리기( 스택은 높은 주소에서 낮은 주소로 증가하므로 주소 값을 낮춰줘여한다.)
+		memcpy(if_->rsp, argv[i], len); // 해당 인자 복사
+		arg_address[i] = if_->rsp; // 인자를 복사해준 주소 값을 저장
+	}
+
+	// 8의 배수로 만들어주기
+	while(if_-> rsp % 8 != 0){
+		if_->rsp --;
+		*(uint8_t*)if_->rsp = 0;
+	}
+
+	// argv[4]~ argv[0] 주소를 스택에 넣기
+	for(int i = argc; i >= 0 ; i --){
+		if_->rsp -= 8; // 스택 늘리고
+		if(i == argc) // 같다면 0으로 세팅
+			memset(if_->rsp, 0, sizeof(char **));
+		else // 다르다면 복사!
+			memcpy(if_->rsp, &arg_address[i], sizeof(char **));
+	}
+
+	// rdi, rsi
+	if_->R.rdi = argc;
+	if_->R.rsi = if_->rsp;
+
+	// fake address
+	if_->rsp = if_->rsp - 8;
+	memset(if_->rsp, 0, sizeof(void*)); 
+}
 /* Loads an ELF executable from FILE_NAME into the current thread.
  * Stores the executable's entry point into *RIP
  * and its initial stack pointer into *RSP.

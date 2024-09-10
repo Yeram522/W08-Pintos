@@ -140,7 +140,7 @@ tid_t thread_create(const char *name, int priority, thread_func *, void *);
 
 void thread_block(void);
 void thread_unblock(struct thread *);
-
+void thread_preemption (void);
 struct thread *thread_current(void);
 tid_t thread_tid(void);
 const char *thread_name(void);
@@ -161,7 +161,6 @@ int thread_get_load_avg(void);
 void set_recent_cpu();
 void set_load_avg(void);
 void thread_set_mlfqs_priority(void);
-
 void do_iret(struct intr_frame *tf);
 
 struct list_elem *list_max_with_empty_check(struct list *list, list_less_func *less, void *aux); // <Yeram522> Test용 max priority code
