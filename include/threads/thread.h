@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/interrupt.h"
+#include "threads/vaddr.h" /* project 2 */
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -104,6 +105,10 @@ struct thread
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem; /* List element. */
 
+	/* project 2 */
+	int exit_status; /* syscall exit() */
+	struct file *fdt[PGSIZE/sizeof(struct file*)];
+
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4; /* Page map level 4 */
@@ -163,6 +168,8 @@ void set_load_avg(void);
 void thread_set_mlfqs_priority(void);
 
 void do_iret(struct intr_frame *tf);
+
+void thread_preemption (void);
 
 struct list_elem *list_max_with_empty_check(struct list *list, list_less_func *less, void *aux); // <Yeram522> Test용 max priority code
 
