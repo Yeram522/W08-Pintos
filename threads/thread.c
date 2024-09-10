@@ -13,7 +13,7 @@
 #include "intrinsic.h"
 #ifdef USERPROG
 #include "userprog/process.h"
-#include "thread.h"
+#include "threads/thread.h"
 #endif
 
 /* Random value for struct thread's `magic' member.
@@ -234,7 +234,7 @@ thread_create (const char *name, int priority,
 	thread_unblock (t);
 
 	if(thread_get_priority() < t->priority) 
-		thread_yield();
+		thread_preemption();
 
 	return tid;
 }
@@ -338,6 +338,25 @@ thread_yield (void) {
 	intr_set_level (old_level);
 }
 
+void
+thread_preemption(void){
+	enum intr_level old_level;
+	struct thread *curr = thread_current();
+	struct thread *ready = list_entry(list_begin(&ready_list), struct thread, elem);
+
+	if (list_empty(&ready_list))
+		return;
+
+	old_level = intr_disable();
+
+	if (!intr_context() && curr -> priority < ready -> priority){
+		thread_yield();
+	}
+
+	intr_set_level(old_level);
+
+}
+
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
@@ -363,7 +382,7 @@ thread_set_priority (int new_priority) {
 		struct thread *front = list_entry (list_begin (&ready_list), struct thread, elem);
 		if (front -> priority > t -> priority)
 		{
-			thread_yield();
+			thread_preemption();
 		}
 		
 	}

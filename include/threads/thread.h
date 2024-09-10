@@ -9,6 +9,8 @@
 #include "vm/vm.h"
 #endif
 
+#define USERPROG
+
 /* States in a thread's life cycle. */
 enum thread_status
 {
@@ -147,9 +149,12 @@ const char *thread_name(void);
 
 void thread_exit(void) NO_RETURN;
 void thread_yield(void);
+void thread_preemption(void);
+
 
 int thread_get_priority(void);
 void thread_set_priority(int);
+
 
 void thread_donate_priority(struct lock *);
 void thread_recover_priority(struct lock *);

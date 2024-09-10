@@ -50,8 +50,12 @@ process_create_initd (const char *file_name) {
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
 
+	// file_name 에서 실제 파일만 분리하기
+	char *save_ptr;
+	char *f_name = strtok_r((char *)file_name," ", &save_ptr);
+
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
+	tid = thread_create (f_name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
 	return tid;
@@ -168,13 +172,13 @@ process_exec (void *f_name) {
 	/* We cannot use the intr_frame in the thread structure.
 	 * This is because when current thread rescheduled,
 	 * it stores the execution information to the member. */
-	struct intr_frame _if;
+	struct intr_frame _if; // intr_frame 내 구조체 멤버에 필요한 정보를 담는다. 
 	_if.ds = _if.es = _if.ss = SEL_UDSEG;
 	_if.cs = SEL_UCSEG;
 	_if.eflags = FLAG_IF | FLAG_MBS;
 
 	/* We first kill the current context */
-	process_cleanup ();
+	process_cleanup (); // 새로운 실행 파일을 현재 스레드에 담기 전에 먼저 현재 process에 담긴 context를 지워줌
 
 	/* And then load the binary */
 	success = load (file_name, &_if);
@@ -184,11 +188,63 @@ process_exec (void *f_name) {
 	if (!success)
 		return -1;
 
+	hex_dump(_if.rsp, _if.rsp, USER_STACK - _if.rsp, true);
+
 	/* Start switched process. */
 	do_iret (&_if);
 	NOT_REACHED ();
 }
 
+// 인자들을 스택에 저장하는 함수
+void 
+argument_stack(char **argv, int argc, struct intr_frame *if_) {
+	
+	if_->rsp = USER_STACK;
+	char *arg_address[128];
+
+	// 거꾸로 삽입 -> 스택은 반대 방향으로 확장하기 때문
+
+	// 맨 끝 NULL값을 제외하고 스택에 저장한다.
+	for (int i = argc -1; i >= 0; i--){
+		int arg_i_len = strlen(argv[i]) + 1; // sentinel(\0) 을 포함하기
+		/* 
+		if_->rsp: 현재 user stack에서 현재 위치를 가리키는 스택 포인터.
+		각 인자에서 인자 크기(argv_len)를 읽고 (이때 각 인자에 sentinel이 포함되어 있으니 +1 - strlen에서는 sentinel 빼고 읽음)
+		그 크기만큼 rsp를 내려준다. 그 다음 빈 공간만큼 memcpy를 해준다.
+		 */
+		if_ -> rsp -= arg_i_len; // 인자 크기 만큼 rsp값을 늘려줌
+		memcpy(if_ -> rsp, argv[i], arg_i_len); // 늘려준 공간에 해당 인자를 복사하기
+		arg_address[i] = if_ ->rsp; // arg_address 에 위 인자를 복사해준 주소값을 저장하기
+	}
+
+	// word_align : 8의 배수를 맞추기 위해 padding 을 삽입한다.
+	while (if_ -> rsp % 8 != 0)
+	{
+		if_ -> rsp--; // 주소값 1 내리기
+		*(int8_t *)if_ -> rsp = 0;	// 데이터에 0 삽입 -> 8바이트 저장
+	}
+	
+	/*이제는 주소값 자체를 삽입한다! 이때 센티널을 포함해서 넣기*/
+
+	for (int i = argc; i >= 0; i--){
+		// NULL 값 포인터도 같이 넣는다.
+		if_ -> rsp = if_ -> rsp - 8; // 8바이트만큼 내리기
+		if(i == argc){ // 가장 위에는 NULL 이 아닌 0 을 넣기
+			memset(if_ -> rsp, 0, sizeof(char **));
+		}else{ // 나머지에는 arg_address 안에 들어있는 값 가져오기
+			memcpy(if_ -> rsp, &arg_address[i], sizeof(char **));
+		}
+	}
+
+	// 가짜 주소 넣기
+	if_ -> rsp = if_-> rsp - 8; //void 포인터 (8바이트 크기)
+	memset(if_->rsp, 0, sizeof(void *));
+
+
+	// rdi, rsi 셋팅
+	if_-> R.rdi = argc;
+	if_-> R.rsi = if_-> rsp + 8;
+}
 
 /* Waits for thread TID to die and returns its exit status.  If
  * it was terminated by the kernel (i.e. killed due to an
@@ -204,6 +260,7 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+	while(true) { }
 	return -1;
 }
 
@@ -216,7 +273,16 @@ process_exit (void) {
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
 
+	// for (int fd = 0; fd < FD_COUNT_LIMIT; fd++){
+	// 	close(fd);
+	// }
+	// palloc_free_multiple(curr->fd_table, FDT_PAGES);
+	// file_close(curr->runn_file);
+
 	process_cleanup ();
+
+	// sema_up(&curr->wait_sema);
+	// sema_down(&curr->exit_sema);
 }
 
 /* Free the current process's resources. */
@@ -329,6 +395,25 @@ load (const char *file_name, struct intr_frame *if_) {
 	bool success = false;
 	int i;
 
+
+	// file_name pasing을 위해 인자 저장할 배열 선언하기
+	char *argv[128]; // 스택에 저장
+	char *copy_file[128];
+	int argc = 0; // 인자 개수
+
+	// 원본 file_name copy
+	memcpy(copy_file, file_name, strlen(file_name)+1);
+
+	// file_name을 파싱하기
+	char *token, *save_ptr;
+	token = strtok_r(copy_file," ",&save_ptr); 
+	while (token != NULL)
+	{
+		argv[argc] = token;
+		token = strtok_r(NULL," ", &save_ptr); // 다음 인자 파싱
+		argc++;
+	}
+
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
 	if (t->pml4 == NULL)
@@ -336,7 +421,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	process_activate (thread_current ());
 
 	/* Open executable file. */
-	file = filesys_open (file_name);
+	file = filesys_open (copy_file);
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", file_name);
 		goto done;
@@ -416,6 +501,7 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
+	argument_stack(argv, argc, if_);
 
 	success = true;
 
