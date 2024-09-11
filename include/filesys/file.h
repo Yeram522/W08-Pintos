@@ -3,6 +3,7 @@
 
 #include "filesys/off_t.h"
 
+#define FD_MAX 3 /* 문제 일어나면 바꾸든가 ㅋ*/
 struct inode;
 
 /* Opening and closing files. */

@@ -5,6 +5,9 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/interrupt.h"
+#include "threads/synch.h"
+#include "filesys/file.h"
+#include "threads/vaddr.h" /* project 2 */
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -101,6 +104,17 @@ struct thread
 	int nice;
 	int recent_cpu;
 
+	/*project 2 ---------------------------------------*/
+	struct thread* parent; /*parent thread*/
+
+	int exit_status; /* syscall exit()*/
+	struct file *fdt[FD_MAX];
+	
+	struct semaphore child_waiting_sema; /*waiting child exit*/
+	struct list children_list; /*parent's children list*/
+	struct list_elem child_elem; /*for list elem*/
+	struct semaphore create_sema; /* waiting child create */
+	/* ----------------------------------------------- */
 	struct list_elem thread_elem;
 
 	/* Shared between thread.c and synch.c. */

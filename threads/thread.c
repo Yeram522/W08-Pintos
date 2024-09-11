@@ -8,7 +8,6 @@
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"
 #include "threads/palloc.h"
-#include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
 #ifdef USERPROG
@@ -217,7 +216,7 @@ thread_create (const char *name, int priority,
 	/* Initialize thread. */
 	init_thread (t, name, priority);
 	tid = t->tid = allocate_tid ();
-
+	
 	/* Call the kernel_thread if it scheduled.
 	 * Note) rdi is 1st argument, and rsi is 2nd argument. */
 	t->tf.rip = (uintptr_t) kernel_thread;
@@ -572,6 +571,9 @@ init_thread (struct thread *t, const char *name, int priority) {
 	list_init (&t->locks);
 	t->nice = 0;
 	t->recent_cpu = 0;
+	/*project 2 init ---------------------------------------*/
+	t->parent = NULL;
+	/* ---------------------------------------------------- */
 	t->magic = THREAD_MAGIC;
 }
 
