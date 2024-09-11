@@ -143,7 +143,7 @@ void exit(int status){
 }
 
 int open (const char *file) {
-	printf ("systemcall!:open \n");
+	//printf ("systemcall!:open \n");
 
 	if(file == NULL || !is_user_vaddr(file) ||  file == "\0") {
 		return -1;
@@ -161,7 +161,7 @@ int open (const char *file) {
 }
 
 int filesize (int fd) {
-	printf ("systemcall!:filesize \n");
+	//printf ("systemcall!:filesize \n");
 	struct thread* curr = thread_current();
 	struct file* file = curr->fdt[fd];
 	if(file == NULL)
@@ -170,7 +170,7 @@ int filesize (int fd) {
 }
 
 int read (int fd, void *buffer, unsigned length) {
-	printf ("systemcall!:read \n");
+	//printf ("systemcall!:read \n");
 	struct file * file = thread_current()->fdt[fd];
 	if(file == NULL)
 		return -1;
@@ -178,7 +178,7 @@ int read (int fd, void *buffer, unsigned length) {
 }
 
 int write (int fd, const void *buffer, unsigned length) {
-	printf ("systemcall!:write \n");
+	//printf ("systemcall!:write \n");
 	
 	if(fd == STDOUT_FILENO)
 	{
@@ -195,7 +195,7 @@ int write (int fd, const void *buffer, unsigned length) {
 }
 
 void seek (int fd, unsigned position) {
-	printf ("systemcall!:seek \n");
+	//printf ("systemcall!:seek \n");
 	struct file * file = thread_current()->fdt[fd];
 	if(file == NULL)
 		return -1;
@@ -203,7 +203,7 @@ void seek (int fd, unsigned position) {
 }
 
 unsigned tell (int fd) {
-	printf ("systemcall!:tell \n");
+	//printf ("systemcall!:tell \n");
 	struct file * file = thread_current()->fdt[fd];
 	if(file == NULL)
 		return -1;
@@ -213,7 +213,7 @@ unsigned tell (int fd) {
 void close (int fd) {
 	// 유효한 주소 체크 함수 넣어주어야함.
 	// 전역 fd pool의 해당 fd 인덱스 off
-	printf ("systemcall!:close \n");
+	//printf ("systemcall!:close \n");
 	if(!fd_pool[fd]) // 파일을 연속으로 닫으려고 할 경우 = 이미 닫혀있는 경우
 		exit(-1);
 

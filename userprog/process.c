@@ -36,11 +36,12 @@ process_init (void) {
 	current->exit_status = 0;
 	memset(current->fdt, NULL, FD_MAX);
 
-	sema_init(&current->child_waiting_sema, 1);
-	list_init(&current->children_list);
-
-
-	sema_down(&current->child_waiting_sema); /*종료될때 자신의 락 반납*/
+	if (!current->children_list_initialized) {
+        list_init(&current->children_list);
+        current->children_list_initialized = true;
+    }
+	
+	//sema_down(&current->child_waiting_sema); /*종료될때 자신의 락 반납*/
 }
 
 struct fork_context {
@@ -69,9 +70,9 @@ process_create_initd (const char *file_name) {
 	char *f_name = strtok_r((char *)file_name," ", &save_ptr);
 
 	/* Create a new thread to execute FILE_NAME. */
-	sema_init(&thread_current()->create_sema, 0);
+	//sema_init(&thread_current()->create_sema, 0);
 	tid = thread_create (f_name, PRI_DEFAULT, initd, fn_copy);
-	sema_up(&thread_current()->create_sema);
+	//sema_up(&thread_current()->create_sema);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
 
@@ -295,12 +296,12 @@ process_wait (tid_t child_tid UNUSED) {
 
 	struct thread* parent = thread_current();
 
-	sema_down(&parent->create_sema);
+	//sema_down(&parent->create_sema);
 
-	struct list_elem* e = list_begin(&parent->child_elem);
+	struct list_elem* e = list_begin(&parent->children_list);
 	struct thread* t = list_entry(e,struct thread, child_elem);
 
-	while(e != list_end(&parent->child_elem))
+	while(e != list_end(&parent->children_list))
 	{
 		if(t->tid == child_tid)
 		{
@@ -312,7 +313,7 @@ process_wait (tid_t child_tid UNUSED) {
 	}
 
 	// child list에 해당 pid를 가진 elem 이 없을 경우 exit(-1)
-	if( e == list_end(&parent->child_elem))
+	if( e == list_end(&parent->children_list))
 		return -1;
 
 	return t->exit_status;

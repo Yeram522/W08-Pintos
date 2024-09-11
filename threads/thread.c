@@ -228,6 +228,16 @@ thread_create (const char *name, int priority,
 	t->tf.cs = SEL_KCSEG;
 	t->tf.eflags = FLAG_IF;
 	
+	t->parent = thread_current(); //여기에 넣어주는게 맞는지 모르겠음.
+
+	sema_init(&t->child_waiting_sema, 0);
+	// 부모 스레드의 children_list 초기화 확인
+    if (!t->parent->children_list_initialized) {
+        list_init(&t->parent->children_list);
+        t->parent->children_list_initialized = true;
+    }
+	list_push_back(&t->parent->children_list, &t->child_elem);
+
 	list_push_back(&all_thread_list, &t->thread_elem);
 	
 	thread_unblock (t);
@@ -573,6 +583,8 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->recent_cpu = 0;
 	/*project 2 init ---------------------------------------*/
 	t->parent = NULL;
+	t->children_list_initialized = false;
+    list_init(&t->child_elem);
 	/* ---------------------------------------------------- */
 	t->magic = THREAD_MAGIC;
 }

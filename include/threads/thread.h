@@ -113,9 +113,10 @@ struct thread
 	struct semaphore child_waiting_sema; /*waiting child exit*/
 	struct list children_list; /*parent's children list*/
 	struct list_elem child_elem; /*for list elem*/
-	struct semaphore create_sema; /* waiting child create */
+	//struct semaphore create_sema; /* waiting child create */
 	/* ----------------------------------------------- */
 	struct list_elem thread_elem;
+	bool children_list_initialized;
 
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem; /* List element. */
