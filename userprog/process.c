@@ -28,6 +28,9 @@ static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
 static void __do_fork (void *);
 
+struct semaphore thread_create_sema;
+struct semaphore file_sema;
+
 /* General process initializer for initd and other process. */
 static void
 process_init (void) {
@@ -40,14 +43,8 @@ process_init (void) {
         list_init(&current->children_list);
         current->children_list_initialized = true;
     }
-	
-	//sema_down(&current->child_waiting_sema); /*종료될때 자신의 락 반납*/
 }
 
-struct fork_context {
-	struct thread *current;
-	struct intr_frame *if_;
-};
 /* Starts the first userland program, called "initd", loaded from FILE_NAME.
  * The new thread may be scheduled (and may even exit)
  * before process_create_initd() returns. Returns the initd's
@@ -69,12 +66,16 @@ process_create_initd (const char *file_name) {
 	char *save_ptr;
 	char *f_name = strtok_r((char *)file_name," ", &save_ptr);
 
+	sema_init(&thread_create_sema, 0);
+	sema_init(&file_sema, 0);
+
 	/* Create a new thread to execute FILE_NAME. */
-	//sema_init(&thread_current()->create_sema, 0);
 	tid = thread_create (f_name, PRI_DEFAULT, initd, fn_copy);
-	//sema_up(&thread_current()->create_sema);
+
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
+	else 
+		sema_down(&thread_create_sema);
 
 	return tid;
 }
@@ -87,6 +88,7 @@ initd (void *f_name) {
 #endif
 
 	process_init ();
+	sema_up(&thread_create_sema);
 
 	if (process_exec (f_name) < 0)
 		PANIC("Fail to launch initd\n");
@@ -98,11 +100,17 @@ initd (void *f_name) {
 tid_t
 process_fork (const char *name, struct intr_frame *if_ UNUSED) {
 	/* Clone current thread to new thread.*/
-	struct fork_context fc;
-	fc.current = thread_current ();
-	fc.if_ = if_;
+	//struct fork_context fc;
+	//fc.current = thread_current ();
+	//fc.if_ = if_;
+	//memcpy(if_, fc.if_, sizeof(struct intr_frame));
+
+	thread_current()->tf = *if_;
+
+	//return thread_create (name,
+			//PRI_DEFAULT, __do_fork, &fc);
 	return thread_create (name,
-			PRI_DEFAULT, __do_fork, &fc);
+			PRI_DEFAULT, __do_fork, thread_current());
 }
 
 #ifndef VM
@@ -118,7 +126,7 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 
 	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
 	if(is_kernel_vaddr(va)) 
-		return;
+		return false;
 
 	/* 2. Resolve VA from the parent's page map level 4. */
 	parent_page = pml4_get_page (parent->pml4, va);
@@ -126,6 +134,8 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 	/* 3. TODO: Allocate new PAL_USER page for the child and set result to
 	 *    TODO: NEWPAGE. */
 	newpage = palloc_get_page(PAL_USER);
+	if (newpage == NULL)
+		return false;
 
 	/* 4. TODO: Duplicate parent's page to the new page and
 	 *    TODO: check whether parent's page is writable or not (set WRITABLE
@@ -150,11 +160,11 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 static void
 __do_fork (void *aux) {
 	struct intr_frame if_;
-	struct fork_context *fc = (struct fork_context *)aux;
-	struct thread *parent = fc->current;
+	struct thread *parent = aux;
 	struct thread *current = thread_current ();
 	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-	struct intr_frame *parent_if = fc->if_;
+	//struct intr_frame *parent_if = fc->if_;
+	struct intr_frame *parent_if = &parent->tf;
 	bool succ = true;
 
 	/* 1. Read the cpu context to local stack. */
@@ -164,9 +174,6 @@ __do_fork (void *aux) {
 	current->pml4 = pml4_create();
 	if (current->pml4 == NULL)
 		goto error;
-
-	// current->parent = parent; //여기에 넣어주는게 맞는지 모르겠음.
-	// list_push_back(&parent->children_list, &current->child_elem);
 
 	process_activate (current);
 #ifdef VM
@@ -183,10 +190,22 @@ __do_fork (void *aux) {
 	 * TODO:       in include/filesys/file.h. Note that parent should not return
 	 * TODO:       from the fork() until this function successfully duplicates
 	 * TODO:       the resources of parent.*/
-
-	if_.R.rax = (uint64_t) 0; // 자식 프로세스의 반환값을 0으로 설정
-	
 	process_init ();
+	if_.R.rax = (uint64_t) 0; // 자식 프로세스의 반환값을 0으로 설정
+
+	sema_down(&file_sema);
+
+	for(int i = 0; i < FD_MAX; i++)
+	{
+		struct file *file = parent->fdt[i];
+		if(file == NULL)
+			continue;
+		if(file > 2)
+			file = file_duplicate (parent->fdt[i]);
+		current->fdt[i] = file;
+	}
+
+	sema_up(&file_sema);
 
 	/* Finally, switch to the newly created process. */
 	if (succ)
@@ -201,6 +220,7 @@ int
 process_exec (void *f_name) {
 	char *file_name = f_name;
 	bool success;
+	struct thread *curr = thread_current();
 
 	/* We cannot use the intr_frame in the thread structure.
 	 * This is because when current thread rescheduled,
@@ -221,7 +241,6 @@ process_exec (void *f_name) {
 	if (!success)
 		return -1;
 
-	//hex_dump(_if.rsp, _if.rsp, USER_STACK - _if.rsp, true);
 
 	/* Start switched process. */
 	do_iret (&_if);
@@ -229,54 +248,37 @@ process_exec (void *f_name) {
 }
 
 // 인자들을 스택에 저장하는 함수
-void 
-argument_stack(char **argv, int argc, struct intr_frame *if_) {
-	
-	if_->rsp = USER_STACK;
-	char *arg_address[128];
-
-	// 거꾸로 삽입 -> 스택은 반대 방향으로 확장하기 때문
-
-	// 맨 끝 NULL값을 제외하고 스택에 저장한다.
-	for (int i = argc -1; i >= 0; i--){
-		int arg_i_len = strlen(argv[i]) + 1; // sentinel(\0) 을 포함하기
-		/* 
-		if_->rsp: 현재 user stack에서 현재 위치를 가리키는 스택 포인터.
-		각 인자에서 인자 크기(argv_len)를 읽고 (이때 각 인자에 sentinel이 포함되어 있으니 +1 - strlen에서는 sentinel 빼고 읽음)
-		그 크기만큼 rsp를 내려준다. 그 다음 빈 공간만큼 memcpy를 해준다.
-		 */
-		if_ -> rsp -= arg_i_len; // 인자 크기 만큼 rsp값을 늘려줌
-		memcpy(if_ -> rsp, argv[i], arg_i_len); // 늘려준 공간에 해당 인자를 복사하기
-		arg_address[i] = if_ ->rsp; // arg_address 에 위 인자를 복사해준 주소값을 저장하기
-	}
-
-	// word_align : 8의 배수를 맞추기 위해 padding 을 삽입한다.
-	while (if_ -> rsp % 8 != 0)
-	{
-		if_ -> rsp--; // 주소값 1 내리기
-		*(int8_t *)if_ -> rsp = 0;	// 데이터에 0 삽입 -> 8바이트 저장
-	}
-	
-	/*이제는 주소값 자체를 삽입한다! 이때 센티널을 포함해서 넣기*/
-
-	for (int i = argc; i >= 0; i--){
-		// NULL 값 포인터도 같이 넣는다.
-		if_ -> rsp = if_ -> rsp - 8; // 8바이트만큼 내리기
-		if(i == argc){ // 가장 위에는 NULL 이 아닌 0 을 넣기
-			memset(if_ -> rsp, 0, sizeof(char **));
-		}else{ // 나머지에는 arg_address 안에 들어있는 값 가져오기
-			memcpy(if_ -> rsp, &arg_address[i], sizeof(char **));
-		}
-	}
-
-	// 가짜 주소 넣기
-	if_ -> rsp = if_-> rsp - 8; //void 포인터 (8바이트 크기)
-	memset(if_->rsp, 0, sizeof(void *));
-
-
-	// rdi, rsi 셋팅
-	if_-> R.rdi = argc;
-	if_-> R.rsi = if_-> rsp + 8;
+void
+argument_stack(struct intr_frame *if_, char **arg_value, int arg_count){
+    int i;
+    void *arg_p[25];
+    if_->rsp = USER_STACK;
+	struct thread *curr = thread_current();
+    //instesr argv string
+    for(i=arg_count-1;i>=0;i--){
+        int argv_len =strlen(arg_value[i])+1;
+        if_->rsp-=argv_len;
+        memcpy(if_->rsp, arg_value[i],argv_len);
+        arg_p[i] = if_->rsp;
+    }
+    //padding
+    if_->rsp = ROUND_DOWN(if_->rsp, 8);
+    // if_->rsp &= (~7);
+    // arg[argc]
+    if_->rsp -=8;
+    memset(if_->rsp, 0, sizeof(char **));
+    //insert argv adress
+    for(i=arg_count-1;i>=0;i--){
+        if_->rsp -= 8;
+        // memcpy(if_->rsp,(char *)arg_p[i],sizeof(char *));
+        *(char **)if_->rsp = arg_p[i];
+    }
+    //fake return address
+    if_->rsp -=8;
+    memset(if_->rsp,0,sizeof(void (*)()));
+    // memcpy(if_->rsp,0x400008,sizeof(void (*)));
+    if_->R.rdi  = arg_count;
+    if_->R.rsi = if_->rsp + 8; // fake_address 바로 위: arg_address 맨 앞 가리키는 주소값!
 }
 
 /* Waits for thread TID to die and returns its exit status.  If
@@ -294,9 +296,9 @@ process_wait (tid_t child_tid UNUSED) {
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
 
-	struct thread* parent = thread_current();
 
-	//sema_down(&parent->create_sema);
+
+	struct thread* parent = thread_current();
 
 	struct list_elem* e = list_begin(&parent->children_list);
 	struct thread* t = list_entry(e,struct thread, child_elem);
@@ -330,8 +332,8 @@ process_exit (void) {
 	if(curr->parent != NULL) {/*자식일 경우 부모의 자식 리스트에서 제거*/
 		list_remove(&curr->child_elem); 
 	}
-	sema_up(&curr->child_waiting_sema);
 	printf("%s: exit(%d)\n", curr->name, curr->exit_status);
+	sema_up(&curr->child_waiting_sema);
 
 	process_cleanup ();
 }
@@ -448,8 +450,8 @@ load (const char *file_name, struct intr_frame *if_) {
 
 
 	// file_name pasing을 위해 인자 저장할 배열 선언하기
-	char *argv[128]; // 스택에 저장
-	char *copy_file[128];
+	char *argv[25]; // 스택에 저장
+	char *copy_file[25];
 	int argc = 0; // 인자 개수
 
 	// 원본 file_name copy
@@ -552,13 +554,13 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
-	argument_stack(argv, argc, if_);
+	argument_stack(if_, argv, argc);
 
 	success = true;
 
 done:
 	/* We arrive here whether the load is successful or not. */
-	file_close (file);
+	// file_close (file);
 	return success;
 }
 

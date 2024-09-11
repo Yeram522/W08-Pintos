@@ -19,7 +19,7 @@ bool fd_pool[FD_MAX];
 
 typedef int pid_t;
 
-pid_t fork (const char *thread_name);
+pid_t fork (const char *thread_name, struct intr_frame *f);
 void exit(int status);
 int open (const char *file);
 int filesize (int fd);
@@ -73,7 +73,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			exit(f->R.rdi);
 			break;
 		case SYS_FORK:
-		 	f->R.rax = fork(f->R.rdi);
+		 	f->R.rax = fork(f->R.rdi, f);
 		 	break;
 		case SYS_EXEC:
 			if(!is_user_vaddr(f->R.rdi)) exit(-1);
@@ -85,7 +85,10 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		 	f->R.rax = process_wait(f->R.rdi);
 		 	break;
 		case SYS_CREATE:
-			if(!is_user_vaddr(f->R.rdi)) exit(-1);
+			if(!is_user_vaddr(f->R.rdi)|| pml4_get_page(curr->pml4,f->R.rdi) == NULL || f->R.rdi == NULL) exit(-1);
+			/*struct dir *dir = dir_open_root ();
+			struct inode *inode = NULL;
+			if(dir_lookup(dir,f->R.rdi,&inode)) exit(-1);*/ //create-exists 하는 중.
 
 			if(filesys_create(f->R.rdi, f->R.rsi))
 				f->R.rax = true;
@@ -101,6 +104,10 @@ syscall_handler (struct intr_frame *f UNUSED) {
 				exit(-1);
 			break;
 		case SYS_OPEN:
+			if(!is_user_vaddr(f->R.rdi)|| pml4_get_page(curr->pml4,f->R.rdi) == NULL || f->R.rdi == "" || f->R.rdi == NULL) {
+				f->R.rax = 0;
+				break;
+			}
 			f->R.rax = open(f->R.rdi);
 			if(f->R.rax < 0)
 				exit(-1);
@@ -130,16 +137,17 @@ syscall_handler (struct intr_frame *f UNUSED) {
 
 }
 
-pid_t fork (const char *thread_name) {
+pid_t fork (const char *thread_name, struct intr_frame *f) {
 	//새로은 프로세스의 parent에 현재 쓰레드 넣기.
 	// 부모의 child list에 새로운자식 프로세스 elem 넣기
 	// 새로운 프로세스가 자신의 락 aquire 하기.
-	return process_fork(thread_name, thread_current()->tf);
+	//return process_fork(thread_name, thread_current()->tf);
+	return process_fork(thread_name, f);
 }
 
 void exit(int status){
-	thread_current()->exit_status = status;
-	thread_exit ();
+	thread_current()->exit_status = status; // 스레드의 종료 코드 설정.
+	thread_exit (); // 내부에서 process_exit() 호출 되고 있음.
 }
 
 int open (const char *file) {
@@ -171,15 +179,16 @@ int filesize (int fd) {
 
 int read (int fd, void *buffer, unsigned length) {
 	//printf ("systemcall!:read \n");
+
 	struct file * file = thread_current()->fdt[fd];
 	if(file == NULL)
 		return -1;
-	return (int) file_read(file,buffer,length);
+	int read_byte = (int) file_read(file, buffer, length);
+	return read_byte;
 }
 
 int write (int fd, const void *buffer, unsigned length) {
 	//printf ("systemcall!:write \n");
-	
 	if(fd == STDOUT_FILENO)
 	{
 		putbuf(buffer, length);
@@ -191,7 +200,9 @@ int write (int fd, const void *buffer, unsigned length) {
 	struct file * file = thread_current()->fdt[fd];
 	if(file == NULL)
 		return -1;
-	return (int) file_write(file,buffer,length);
+	int write_byte = (int) file_write(file, buffer, length);
+
+	return write_byte;
 }
 
 void seek (int fd, unsigned position) {
@@ -220,7 +231,7 @@ void close (int fd) {
 	struct file * file = thread_current()->fdt[fd];
 	if(file == NULL)
 		exit(-1);
-
+	
 	fd_pool[fd] = false;
 	file_close(file);
 }

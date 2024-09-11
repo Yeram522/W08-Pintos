@@ -188,21 +188,26 @@ lock_init (struct lock *lock) {
    we need to sleep. */
 void
 lock_acquire (struct lock *lock) {
+	struct thread *curr = thread_current();
+	enum intr_level old_level;
+
 	ASSERT (lock != NULL);
 	ASSERT (!intr_context ());
 	ASSERT (!lock_held_by_current_thread (lock));
-	struct thread *curr = thread_current();
+
+	old_level = intr_disable ();
 
 	curr->waiting_lock = lock;
-
 	if(!thread_mlfqs) {
 		thread_donate_priority(lock);
 	}
 	
 	sema_down (&lock->semaphore);
-
 	lock->holder = curr;
 	curr->waiting_lock = NULL;
+
+	intr_set_level (old_level);
+
 
 	list_push_back(&lock->holder->locks, &lock->elem);
 }
