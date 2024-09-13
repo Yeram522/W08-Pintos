@@ -31,6 +31,9 @@ static void __do_fork (void *);
 static void
 process_init (void) {
 	struct thread *current = thread_current ();
+	// 프로세스라는 개념 구현하기 
+	// 공유자원 
+	// fd 초기화하기 
 }
 
 /* Starts the first userland program, called "initd", loaded from FILE_NAME.
@@ -403,7 +406,7 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	// 원본 file_name copy
 	memcpy(copy_file, file_name, strlen(file_name)+1);
-
+ 
 	// file_name을 파싱하기
 	char *token, *save_ptr;
 	token = strtok_r(copy_file," ",&save_ptr); 

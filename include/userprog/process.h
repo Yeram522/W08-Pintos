@@ -11,4 +11,16 @@ void process_exit (void);
 void process_activate (struct thread *next);
 void argument_stack(char **argv, int argc, struct intr_frame *if_);
 
+// struct file_descriptor
+// {
+//     struct file* fd[512];
+//     //8 * 512 = 4096 = > 4kb
+// }
+// struct process { // 이렇게하면 멀티 스레딩 까지 엮을 수 있음.
+//     // page 
+//     struct file_descriptor* fd;
+//     struct list threads;
+//     struct list_elem elem;
+//     struct lock fd_lock;
+// }
 #endif /* userprog/process.h */
